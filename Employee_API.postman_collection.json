@@ -1,0 +1,662 @@
+{
+  "info": {
+    "_postman_id": "employee-api-collection",
+    "name": "Employee API",
+    "description": "Complete Employee API Testing Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variables": [
+    {
+      "key": "base_url",
+      "value": "http://localhost",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.access_token) {",
+                  "        pm.environment.set('access_token', jsonData.access_token);",
+                  "        pm.test('Login successful and token saved', function () {",
+                  "            pm.expect(jsonData.success).to.be.true;",
+                  "            pm.expect(jsonData.access_token).to.exist;",
+                  "        });",
+                  "    }",
+                  "}",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('Response has success flag', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "});",
+                  "pm.test('Response contains employee data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('firstname');",
+                  "    pm.expect(jsonData).to.have.property('lastname');",
+                  "    pm.expect(jsonData).to.have.property('username');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register New Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201 (Created)', function () {",
+                  "    pm.expect(pm.response.code).to.equal(201);",
+                  "});",
+                  "pm.test('Response has success flag', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "});",
+                  "pm.test('Employee created with correct fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('id');",
+                  "    pm.expect(jsonData.firstname).to.equal('John');",
+                  "    pm.expect(jsonData.username).to.equal('john.doe');",
+                  "});",
+                  "pm.test('Password is not returned', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.not.have.property('password');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_id\": 100,\n  \"employee_number\": \"EMP100\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"surname\": \"Smith\",\n  \"username\": \"john.doe\",\n  \"password\": \"SecurePassword123\",\n  \"status\": \"Active\",\n  \"status_id\": 1,\n  \"position_name\": \"Manager\",\n  \"position_id\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Employee Management",
+      "item": [
+        {
+          "name": "Get Employee Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('Response contains employee profile', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData).to.have.property('id');",
+                  "    pm.expect(jsonData).to.have.property('firstname');",
+                  "    pm.expect(jsonData).to.have.property('lastname');",
+                  "    pm.expect(jsonData).to.have.property('username');",
+                  "});",
+                  "pm.test('Profile contains all required fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('employee_number');",
+                  "    pm.expect(jsonData).to.have.property('position_name');",
+                  "    pm.expect(jsonData).to.have.property('status_id');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/employee/profile?id=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "profile"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List All Employees",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('Response contains employee list', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData).to.have.property('count');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});",
+                  "pm.test('Data is an array', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(Array.isArray(jsonData.data)).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/employee/list",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "list"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Employees - Filter by Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('All returned employees are active', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    jsonData.data.forEach(function(emp) {",
+                  "        pm.expect(emp.status_id).to.equal(1);",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/employee/list?status=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "list"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Employees - Filter by Position",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('All returned employees have position_id 5', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    jsonData.data.forEach(function(emp) {",
+                  "        pm.expect(emp.position_id).to.equal(5);",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/employee/list?position_id=5",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "list"
+              ],
+              "query": [
+                {
+                  "key": "position_id",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('Employee updated successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.firstname).to.equal('Jane');",
+                  "});",
+                  "pm.test('date_updated timestamp changed', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('date_updated');",
+                  "    pm.expect(jsonData.date_updated).to.be.a('number');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1,\n  \"firstname\": \"Jane\",\n  \"position_name\": \"Senior Manager\",\n  \"position_id\": 6\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/update",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "update"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('Employee deleted successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.message).to.include('deleted');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/delete",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "delete"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Error Testing",
+      "item": [
+        {
+          "name": "Login - Invalid Credentials",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 401 (Unauthorized)', function () {",
+                  "    pm.expect(pm.response.code).to.equal(401);",
+                  "});",
+                  "pm.test('Error message returned', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"wrongpassword\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Missing Username",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 (Bad Request)', function () {",
+                  "    pm.expect(pm.response.code).to.equal(400);",
+                  "});",
+                  "pm.test('Error message indicates missing parameters', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.include('required');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register - Duplicate Username",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 422 (Validation Error)', function () {",
+                  "    pm.expect(pm.response.code).to.equal(422);",
+                  "});",
+                  "pm.test('Error contains validation details', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('errors');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_number\": \"EMP101\",\n  \"firstname\": \"Jane\",\n  \"lastname\": \"Doe\",\n  \"username\": \"admin\",\n  \"password\": \"Password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/employee/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Profile - Not Found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404 (Not Found)', function () {",
+                  "    pm.expect(pm.response.code).to.equal(404);",
+                  "});",
+                  "pm.test('Error message indicates employee not found', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.include('not found');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/employee/profile?id=99999",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "employee",
+                "profile"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "99999"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
