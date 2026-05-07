@@ -23,11 +23,19 @@ class EmployeeController extends Controller
     {
         $behaviors = parent::behaviors();
 
-        $behaviors['authenticator'] = [
-            'class' => HttpBearerAuth::class,
-            'except' => ['login', 'register'],
-        ];
+        // // 1. Add CORS filter BEFORE ContentNegotiator
+        // $behaviors['corsFilter'] = [
+        //     'class' => \yii\filters\Cors::class,
+        //     'cors' => [
+        //         // Allow your React/Vue/Frontend origin
+        //         'Origin' => ['http://localhost:3000'],
+        //         'Access-Control-Request-Method' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+        //         'Access-Control-Request-Headers' => ['*'],
+        //         'Access-Control-Allow-Credentials' => true,
+        //     ],
+        // ];
 
+        // 2. Your existing ContentNegotiator
         $behaviors['contentNegotiator'] = [
             'class' => \yii\filters\ContentNegotiator::class,
             'formats' => [
@@ -36,6 +44,35 @@ class EmployeeController extends Controller
         ];
 
         return $behaviors;
+    }
+
+    public function beforeAction($action)
+    {
+        if (!parent::beforeAction($action)) {
+            return false;
+        }
+
+        if (in_array($action->id, ['login', 'register'], true)) {
+            return true;
+        }
+
+        $authHeader = Yii::$app->request->getHeaders()->get('Authorization');
+        if (!$authHeader || !preg_match('/^Bearer\s+(.*?)$/i', $authHeader, $matches)) {
+            Yii::$app->response->statusCode = 401;
+            Yii::$app->response->data = ['error' => 'Authorization header missing or invalid'];
+            return false;
+        }
+
+        $accessToken = $matches[1];
+        $employee = Employee::findByAccessToken($accessToken);
+
+        if (!$employee) {
+            Yii::$app->response->statusCode = 401;
+            Yii::$app->response->data = ['error' => 'Invalid access token'];
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -71,6 +108,8 @@ class EmployeeController extends Controller
         }
 
         $accessToken = $this->generateToken();
+        $employee->access_token = $accessToken;
+        $employee->save(false, ['access_token']);
 
         return [
             'success' => true,

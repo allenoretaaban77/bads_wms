@@ -1,5 +1,9 @@
 <?php
 
+use yii\filters\Cors;
+use yii\filters\ContentNegotiator;
+use yii\web\Response;
+
 $params = require __DIR__ . '/params.php';
 $db = require __DIR__ . '/db.php';
 
@@ -15,6 +19,9 @@ $config = [
         'request' => [
             // !!! insert a secret key in the following (if it is empty) - this is required by cookie validation
             'cookieValidationKey' => 'mUYskUS3ho4EfuT7lsgKXrLgpkKY9_tb',
+        ],
+        'response' => [
+            'format' => Response::FORMAT_JSON,
         ],
         'cache' => [
             'class' => 'yii\caching\FileCache',
@@ -53,7 +60,28 @@ $config = [
                 'GET api/employee/list' => 'employee/list',
                 'PUT api/employee/update' => 'employee/update',
                 'DELETE api/employee/delete' => 'employee/delete',
+                'GET api/inventory/list' => 'inventory/list',
+                'POST api/inventory/create' => 'inventory/create',
+                'POST api/inventory/checksku' => 'inventory/checksku',
+                // 'GET api/inventory/view' => 'inventory/view',
+                // 'PUT api/inventory/update' => 'inventory/update',
+                // 'DELETE api/inventory/delete' => 'inventory/delete',
             ],
+        ],
+    ],
+    'as corsFilter' => [
+        'class' => Cors::class,
+        'cors' => [
+            'Origin' => ['http://localhost:3000'], // allow React/Vue dev server
+            'Access-Control-Request-Method' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+            'Access-Control-Request-Headers' => ['*'],
+            'Access-Control-Allow-Credentials' => true,
+        ],
+    ],
+    'as contentNegotiator' => [
+        'class' => ContentNegotiator::class,
+        'formats' => [
+            'application/json' => Response::FORMAT_JSON,
         ],
     ],
     'params' => $params,

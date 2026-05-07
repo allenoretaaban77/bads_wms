@@ -1,3 +1,13 @@
+button,
+input,
+textarea,
+select,
+.btn,
+.form-control,
+.nav li > form > button.logout {
+    border-radius: 5px;
+}
+
 main > .container {
     padding: 70px 15px 20px;
 }

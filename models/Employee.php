@@ -15,6 +15,7 @@ use yii\db\ActiveRecord;
  * @property string $lastname
  * @property string $surname
  * @property string $username
+ * @property string $access_token
  * @property string $hash
  * @property string $status
  * @property integer $status_id
@@ -23,7 +24,7 @@ use yii\db\ActiveRecord;
  * @property string $date_created
  * @property string $date_updated
  */
-class Employee extends ActiveRecord
+class Employee extends ActiveRecord implements \yii\web\IdentityInterface
 {
     public $password;
 
@@ -38,14 +39,16 @@ class Employee extends ActiveRecord
     public function rules()
     {
         return [
-            [['employee_number', 'firstname', 'lastname', 'username', 'password'], 'required'],
+            [['employee_number', 'firstname', 'lastname', 'username'], 'required'],
+            [['password'], 'required', 'on' => ['insert']],
             [['employee_id', 'status_id', 'position_id'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
             [['employee_number', 'firstname', 'lastname', 'surname', 'username', 'position_name'], 'string', 'max' => 255],
-            [['status'], 'string', 'max' => 50],
+            [['status', 'access_token'], 'string', 'max' => 255],
             [['hash'], 'string'],
             [['employee_number'], 'unique'],
             [['username'], 'unique'],
+            [['access_token'], 'unique'],
             [['password'], 'string', 'min' => 6],
         ];
     }
@@ -100,10 +103,40 @@ class Employee extends ActiveRecord
         return Yii::$app->security->validatePassword($password, $this->hash);
     }
 
+    public static function findIdentity($id)
+    {
+        return static::findOne($id);
+    }
+
+    public static function findIdentityByAccessToken($token, $type = null)
+    {
+        return static::findOne(['access_token' => $token]);
+    }
+
+    public function getId()
+    {
+        return $this->id;
+    }
+
+    public function getAuthKey()
+    {
+        return null;
+    }
+
+    public function validateAuthKey($authKey)
+    {
+        return false;
+    }
+
+    public static function findByAccessToken($token)
+    {
+        return static::findOne(['access_token' => $token]);
+    }
+
     public function fields()
     {
         $fields = parent::fields();
-        unset($fields['hash'], $fields['password']);
+        unset($fields['hash'], $fields['password'], $fields['access_token']);
         return $fields;
     }
 }
