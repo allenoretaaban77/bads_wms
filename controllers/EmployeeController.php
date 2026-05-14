@@ -117,8 +117,8 @@ class EmployeeController extends Controller
             'employee_id' => $employee->employee_id,
             'employee_number' => $employee->employee_number,
             'firstname' => $employee->firstname,
+            'middlename' => $employee->middlename,
             'lastname' => $employee->lastname,
-            'surname' => $employee->surname,
             'username' => $employee->username,
             'position_name' => $employee->position_name,
             'position_id' => $employee->position_id,
@@ -163,8 +163,8 @@ class EmployeeController extends Controller
             'employee_id' => $employee->employee_id,
             'employee_number' => $employee->employee_number,
             'firstname' => $employee->firstname,
+            'middlename' => $employee->middlename,
             'lastname' => $employee->lastname,
-            'surname' => $employee->surname,
             'username' => $employee->username,
             'position_name' => $employee->position_name,
             'position_id' => $employee->position_id,
@@ -206,8 +206,8 @@ class EmployeeController extends Controller
             'employee_id' => $employee->employee_id,
             'employee_number' => $employee->employee_number,
             'firstname' => $employee->firstname,
+            'middlename' => $employee->middlename,
             'lastname' => $employee->lastname,
-            'surname' => $employee->surname,
             'username' => $employee->username,
             'position_name' => $employee->position_name,
             'position_id' => $employee->position_id,
@@ -252,8 +252,8 @@ class EmployeeController extends Controller
                 'employee_id' => $employee->employee_id,
                 'employee_number' => $employee->employee_number,
                 'firstname' => $employee->firstname,
+                'middlename' => $employee->middlename,
                 'lastname' => $employee->lastname,
-                'surname' => $employee->surname,
                 'username' => $employee->username,
                 'position_name' => $employee->position_name,
                 'position_id' => $employee->position_id,
@@ -315,8 +315,8 @@ class EmployeeController extends Controller
             'employee_id' => $employee->employee_id,
             'employee_number' => $employee->employee_number,
             'firstname' => $employee->firstname,
+            'middlename' => $employee->middlename,
             'lastname' => $employee->lastname,
-            'surname' => $employee->surname,
             'username' => $employee->username,
             'position_name' => $employee->position_name,
             'position_id' => $employee->position_id,
@@ -366,6 +366,7 @@ class EmployeeController extends Controller
      */
     private function generateToken()
     {
-        return Yii::$app->security->generateRandomString(32);
+        return 'xlVMmrXld8JzDGQxw_HZN-I1oU_pX_B0';
+        // return Yii::$app->security->generateRandomString(32);
     }
 }

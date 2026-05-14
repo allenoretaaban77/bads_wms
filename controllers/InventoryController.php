@@ -22,20 +22,7 @@ class InventoryController extends Controller
     public function behaviors()
     {
         $behaviors = parent::behaviors();
-
-        // // 1. Add CORS filter BEFORE ContentNegotiator
-        // $behaviors['corsFilter'] = [
-        //     'class' => \yii\filters\Cors::class,
-        //     'cors' => [
-        //         // Allow your React/Vue/Frontend origin
-        //         'Origin' => ['http://localhost:3000'],
-        //         'Access-Control-Request-Method' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
-        //         'Access-Control-Request-Headers' => ['*'],
-        //         'Access-Control-Allow-Credentials' => true,
-        //     ],
-        // ];
-
-        // 2. Your existing ContentNegotiator
+        
         $behaviors['contentNegotiator'] = [
             'class' => \yii\filters\ContentNegotiator::class,
             'formats' => [
@@ -98,11 +85,14 @@ class InventoryController extends Controller
                 ->orFilterWhere(['like', 'total_inventory_cost', $search])
                 ->orFilterWhere(['like', 'total_inventory_value', $search])
                 ->orFilterWhere(['like', 'total_sold', $search])
-                ->orFilterWhere(['like', 'sku', $search]);
+                ->orFilterWhere(['like', 'sku', $search])
+                ->orFilterWhere(['like', 'type', $search])
+                ->orFilterWhere(['like', 'status', $search]);
         }
 
         // 🎯 Filters
         $filters = [
+            'type' => $request->get('type'),
             'rack' => $request->get('rack'),
             'shelf' => $request->get('shelf'),
             'box' => $request->get('box'),
@@ -132,7 +122,7 @@ class InventoryController extends Controller
         if (in_array($sortField, $allowedSortFields)) {
             $query->orderBy([$sortField => $sortOrder]);
         } else {
-            $query->orderBy(['id' => SORT_ASC]);
+            $query->orderBy(['id' => SORT_DESC]);
         }
 
         // Execute query
@@ -196,7 +186,13 @@ class InventoryController extends Controller
         $item->load(Yii::$app->request->post(), '');
 
         // Generate SKU
-        $initials = substr($item->product_name, 0, 2); // Get the initials from the product name
+        $initials = '';// Get the initials from the product name
+        $words = explode(' ', $item->product_name);
+        foreach ($words as $word) {
+            if (!empty($word)) {
+                $initials .= strtoupper(substr($word, 0, 1)); // Get the first letter of each word
+            }
+        }
         $month = date('m'); // Get the current month
         $year = date('y'); // Get the current year
         $lastId = Inventory::find()
@@ -218,6 +214,10 @@ class InventoryController extends Controller
             return ['error' => 'Validation failed', 'errors' => $item->errors];
         }
 
+        $item->status = $item->current_qty == 0 ? 'No Stock' : ($item->current_qty < $item->reorder_level ? 'Low Stock' : 'In Stock');
+        $item->total_inventory_cost = $item->cost_per_unit * $item->current_qty;
+        $item->total_inventory_value = $item->price_per_unit * $item->current_qty;
+
         if (!$item->save()) {
             Yii::$app->response->statusCode = 500;
             return ['error' => 'Failed to save item'];
@@ -231,29 +231,56 @@ class InventoryController extends Controller
      */
     public function actionUpdate()
     {
-        if (Yii::$app->request->method !== 'PUT') {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
             Yii::$app->response->statusCode = 405;
             return ['error' => 'Method not allowed'];
         }
 
         $id = Yii::$app->request->getBodyParam('id');
         $item = Inventory::findOne($id);
-
         if (!$item) {
             Yii::$app->response->statusCode = 404;
             return ['error' => 'Item not found'];
         }
 
-        $item->load(Yii::$app->request->getBodyParams(), '');
+        $item->load(Yii::$app->request->post(), '');
+
+        // Generate SKU
+        $initials = ''; // Get the initials from the product name
+        $words = explode(' ', $item->product_name);
+        foreach ($words as $word) {
+            if (!empty($word)) {
+                $initials .= strtoupper(substr($word, 0, 1)); // Get the first letter of each word
+            }
+        }
+        $month = date('m'); // Get the current month
+        $year = date('y'); // Get the current year
+        $lastId = Inventory::find()
+            ->select('id')
+            ->orderBy(['id' => SORT_DESC])
+            ->limit(1)
+            ->scalar();
+
+        if ($lastId) {
+            $lastId = substr($lastId, -5); // Extract the last 5 digits of the ID
+        } else {
+            $lastId = '00000'; // Set a default value for the first record
+        }
+        $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
+        $item->sku = $sku;
 
         if (!$item->validate()) {
             Yii::$app->response->statusCode = 422;
             return ['error' => 'Validation failed', 'errors' => $item->errors];
         }
 
+        $item->status = $item->current_qty == 0 ? 'No Stock' : ($item->current_qty < $item->reorder_level ? 'Low Stock' : 'In Stock');
+        $item->total_inventory_cost = $item->cost_per_unit * $item->current_qty;
+        $item->total_inventory_value = $item->price_per_unit * $item->current_qty;
+
         if (!$item->save()) {
             Yii::$app->response->statusCode = 500;
-            return ['error' => 'Failed to update item'];
+            return ['error' => 'Failed to save item'];
         }
 
         return ['success' => true, 'data' => $item];

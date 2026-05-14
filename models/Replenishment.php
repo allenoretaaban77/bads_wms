@@ -5,25 +5,13 @@ namespace app\models;
 use Yii;
 
 /**
- * This is the model class for table "inventory".
+ * This is the model class for table "replenishment".
  *
  * @property int $id
- * @property string $product_name
- * @property string $sku
- * @property float $cost_per_unit
- * @property float $price_per_unit
- * @property int $initial_qty
- * @property int $reorder_level
- * @property int $current_qty
- * @property string $type
- * @property string $rack
- * @property string $shelf
- * @property string $box
- * @property string $status
+ * @property string|null $supplier
+ * @property string|null $reference_no
+ * @property string $date_received
  * @property string $remarks
- * @property float|null $total_inventory_cost
- * @property float|null $total_inventory_value
- * @property int|null $total_sold
  * @property string $date_created
  * @property string $date_updated
  * @property string|null $added_by
@@ -31,7 +19,7 @@ use Yii;
  * @property string|null $hash
  * @property string|null $record_status
  */
-class Inventory extends \yii\db\ActiveRecord
+class Replenishment extends \yii\db\ActiveRecord
 {
 
     /**
@@ -45,7 +33,7 @@ class Inventory extends \yii\db\ActiveRecord
      */
     public static function tableName()
     {
-        return 'inventory';
+        return 'replenishment';
     }
 
     /**
@@ -54,19 +42,13 @@ class Inventory extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['total_inventory_cost', 'total_inventory_value', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
-            [['total_sold'], 'default', 'value' => 0],
+            [['supplier', 'reference_no', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'Active'],
-            //[['product_name', 'sku', 'cost_per_unit', 'price_per_unit', 'initial_qty', 'reorder_level', 'current_qty', 'type', 'rack', 'shelf', 'box', 'status', 'remarks'], 'required'],
-            [['cost_per_unit', 'price_per_unit', 'total_inventory_cost', 'total_inventory_value'], 'number'],
-            [['initial_qty', 'reorder_level', 'current_qty', 'total_sold'], 'integer'],
-            [['date_created', 'date_updated'], 'safe'],
+            [['date_received', 'date_created', 'date_updated'], 'safe'],
             [['record_status', 'remarks'], 'string'],
-            [['product_name', 'hash'], 'string', 'max' => 255],
-            [['sku', 'added_by', 'updated_by'], 'string', 'max' => 100],
-            [['type', 'rack', 'shelf', 'box', 'status'], 'string', 'max' => 50],
+            [['supplier', 'hash'], 'string', 'max' => 255],
+            [['reference_no', 'added_by', 'updated_by'], 'string', 'max' => 100],
             ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
-            [['sku'], 'unique', 'targetClass' => '\app\models\Inventory', 'message' => 'SKU must be unique'],
         ];
     }
 
@@ -77,22 +59,10 @@ class Inventory extends \yii\db\ActiveRecord
     {
         return [
             'id' => 'ID',
-            'product_name' => 'Product Name',
-            'sku' => 'Sku',
-            'cost_per_unit' => 'Cost Per Unit',
-            'price_per_unit' => 'Price Per Unit',
-            'initial_qty' => 'Initial Qty',
-            'reorder_level' => 'Reorder Level',
-            'current_qty' => 'Current Qty',
-            'type' => 'Type',
-            'rack' => 'Rack',
-            'shelf' => 'Shelf',
-            'box' => 'Box',
-            'status' => 'Status',
+            'supplier' => 'Supplier',
+            'reference_no' => 'Reference No',
+            'date_received' => 'Date Received',
             'remarks' => 'Remarks',
-            'total_inventory_cost' => 'Total Inventory Cost',
-            'total_inventory_value' => 'Total Inventory Value',
-            'total_sold' => 'Total Sold',
             'date_created' => 'Date Created',
             'date_updated' => 'Date Updated',
             'added_by' => 'Added By',

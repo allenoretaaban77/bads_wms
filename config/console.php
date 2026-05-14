@@ -26,6 +26,10 @@ $config = [
             ],
         ],
         'db' => $db,
+        'formatter' => [
+            'timeZone' => 'Asia/Manila',
+            'defaultTimeZone' => 'Asia/Manila',
+        ],
     ],
     'params' => $params,
     /*

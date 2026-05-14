@@ -12,8 +12,8 @@ use yii\db\ActiveRecord;
  * @property integer $employee_id
  * @property string $employee_number
  * @property string $firstname
+ * @property string $middlename
  * @property string $lastname
- * @property string $surname
  * @property string $username
  * @property string $access_token
  * @property string $hash
@@ -39,11 +39,11 @@ class Employee extends ActiveRecord implements \yii\web\IdentityInterface
     public function rules()
     {
         return [
-            [['employee_number', 'firstname', 'lastname', 'username'], 'required'],
+            [['employee_number', 'firstname', 'middlename', 'lastname', 'username'], 'required'],
             [['password'], 'required', 'on' => ['insert']],
             [['employee_id', 'status_id', 'position_id'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
-            [['employee_number', 'firstname', 'lastname', 'surname', 'username', 'position_name'], 'string', 'max' => 255],
+            [['employee_number', 'firstname', 'middlename', 'lastname', 'username', 'position_name'], 'string', 'max' => 255],
             [['status', 'access_token'], 'string', 'max' => 255],
             [['hash'], 'string'],
             [['employee_number'], 'unique'],
@@ -60,8 +60,8 @@ class Employee extends ActiveRecord implements \yii\web\IdentityInterface
             'employee_id' => 'Employee ID',
             'employee_number' => 'Employee Number',
             'firstname' => 'First Name',
+            'middlename' => 'Middle Name',
             'lastname' => 'Last Name',
-            'surname' => 'Surname',
             'username' => 'Username',
             'password' => 'Password',
             'hash' => 'Hash',
