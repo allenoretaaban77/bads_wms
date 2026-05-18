@@ -14,8 +14,8 @@ use Yii;
  * @property string $remarks
  * @property string $date_created
  * @property string $date_updated
- * @property string|null $added_by
- * @property string|null $updated_by
+ * @property int $added_by
+ * @property int $updated_by
  * @property string|null $hash
  * @property string|null $record_status
  */
@@ -47,7 +47,8 @@ class Replenishment extends \yii\db\ActiveRecord
             [['date_received', 'date_created', 'date_updated'], 'safe'],
             [['record_status', 'remarks'], 'string'],
             [['supplier', 'hash'], 'string', 'max' => 255],
-            [['reference_no', 'added_by', 'updated_by'], 'string', 'max' => 100],
+            [['reference_no'], 'string', 'max' => 100],
+            [['added_by', 'updated_by'], 'integer'],
             ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
         ];
     }

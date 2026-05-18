@@ -19,6 +19,9 @@ $config = [
         'request' => [
             // !!! insert a secret key in the following (if it is empty) - this is required by cookie validation
             'cookieValidationKey' => 'mUYskUS3ho4EfuT7lsgKXrLgpkKY9_tb',
+            'parsers' => [
+                'application/json' => 'yii\web\JsonParser',
+            ]
         ],
         'response' => [
             'format' => Response::FORMAT_JSON,
@@ -69,17 +72,16 @@ $config = [
                 'DELETE api/inventory/delete' => 'inventory/delete',
                 // API routes for Replenishment
                 'GET api/replenishment/list' => 'replenishment/list',
-                'GET api/replenishment/list/$id' => 'replenishment/list/$id',
                 'GET api/replenishment/view' => 'replenishment/view',
                 'POST api/replenishment/create' => 'replenishment/create',
                 'PUT api/replenishment/update' => 'replenishment/update',
                 'DELETE api/replenishment/delete' => 'replenishment/delete',
                 'GET api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
                 // API routes for Replenishment Items
-                'GET api/replenishment-items/list' => 'replenishment-items/list',
-                'POST api/replenishment-items/create' => 'replenishment-items/create',
-                'PUT api/replenishment-items/update' => 'replenishment-items/update',
-                'DELETE api/replenishment-items/delete' => 'replenishment-items/delete',
+                // 'GET api/replenishment-items/list' => 'replenishment-items/list',
+                // 'POST api/replenishment-items/create' => 'replenishment-items/create',
+                // 'PUT api/replenishment-items/update' => 'replenishment-items/update',
+                // 'DELETE api/replenishment-items/delete' => 'replenishment-items/delete',
             ],
         ],
         'formatter' => [

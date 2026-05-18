@@ -4,7 +4,7 @@ namespace app\controllers;
 
 use Yii;
 use app\models\Replenishment;
-use app\models\ReplenishmentItem;
+use app\models\ReplenishmentItems;
 use app\models\Inventory;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
@@ -65,17 +65,78 @@ class ReplenishmentController extends Controller
 
     public function actionCreate()
     {
-        $replenishment = new Replenishment();
-        $replenishment->load(Yii::$app->request->post());
-        $replenishment->created_at = time();
-
-        if (!$replenishment->save()) {
-            return $this->renderAjax('create', [
-                'model' => $replenishment,
-            ]);
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
         }
 
-        return $this->redirect(['view', 'id' => $replenishment->id]);
+        // $item = new Replenishment();
+        // $item->load(Yii::$app->request->post(), '');
+        // return ['data' => $item];
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            $replenishment = new Replenishment();
+            $replenishment->supplier = $data['supplier'] ?? null;
+            $replenishment->reference_no = $data['reference_no'] ?? null;
+            $replenishment->date_received = $data['date_received'] ?? date('Y-m-d');
+            $replenishment->remarks = $data['remarks'] ?? null;
+            $replenishment->date_created = date('Y-m-d H:i:s');
+            $replenishment->added_by = $data['added_by'] ?? null;
+
+            if (!$replenishment->save()) {
+                $transaction->rollBack();
+                return ['success' => false, 'errors' => $replenishment->getErrors()];
+            }
+            Yii::debug($replenishment->getErrors(), __METHOD__);
+
+            if (isset($data['items']) && is_array($data['items'])) {
+                foreach ($data['items'] as $itemData) {
+                    // Try to find the item in inventory by name
+                    $inventory = Inventory::findOne(['product_name' => $itemData['item_name']]);
+                    
+                    if (!$inventory) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Item '{$itemData['item_name']}' not found in inventory"];
+                    }
+
+                    $replenishmentItem = new ReplenishmentItems();
+                    $replenishmentItem->transaction_id = $replenishment->id;
+                    $replenishmentItem->inventory_id = $inventory->id;
+                    $replenishmentItem->qty_added = (int)($itemData['quantity'] ?? 0);
+                    $replenishmentItem->cost_per_unit = (float)($itemData['cost'] ?? 0);
+
+                    if (!$replenishmentItem->save()) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
+                    }
+
+                    // Update Inventory current_qty and cost_per_unit
+                    $inventory->current_qty += $replenishmentItem->qty_added;
+                    if ($replenishmentItem->cost_per_unit > 0) {
+                        $inventory->cost_per_unit = $replenishmentItem->cost_per_unit;
+                    }
+                    
+                    if (!$inventory->save(false)) { // Save without validation to be faster
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to update inventory for '{$itemData['item_name']}'"];
+                    }
+                }
+            }
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Replenishment created successfully',
+                'id' => $replenishment->id
+            ];
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
     }
 
     public function actionSaveItems($replenishmentId)
@@ -98,13 +159,37 @@ class ReplenishmentController extends Controller
         return ['success' => true];
     }
 
-    public function actionView($id)
+        public function actionView($id)
     {
-        $replenishment = $this->findModel($id);
+        $replenishment = Replenishment::find()
+            ->where(['id' => $id])
+            ->asArray()
+            ->one();
 
-        return $this->render('view', [
-            'model' => $replenishment,
-        ]);
+        if (!$replenishment) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Replenishment transaction not found'];
+        }
+
+        $items = ReplenishmentItems::find()
+            ->select([
+                'replenishment_items.*',
+                'product_name' => 'inventory.product_name',
+                'sku' => 'inventory.sku',
+                'total' => new \yii\db\Expression('replenishment_items.qty_added * replenishment_items.cost_per_unit')
+            ])
+            ->leftJoin('inventory', 'inventory.id = replenishment_items.inventory_id')
+            ->where(['transaction_id' => $id])
+            ->asArray()
+            ->all();
+
+
+        $replenishment['items'] = $items;
+
+        return [
+            'success' => true,
+            'data' => $replenishment
+        ];
     }
 
     protected function findModel($id)
