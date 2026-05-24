@@ -115,7 +115,8 @@ class ReplenishmentController extends Controller
                     }
 
                     // Update Inventory current_qty and cost_per_unit
-                    $inventory->current_qty += $replenishmentItem->qty_added;
+                    // $inventory->current_qty += $replenishmentItem->qty_added;
+                    $inventory->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $replenishmentItem->qty_added]);
                     if ($replenishmentItem->cost_per_unit > 0) {
                         $inventory->cost_per_unit = $replenishmentItem->cost_per_unit;
                     }
@@ -176,7 +177,7 @@ class ReplenishmentController extends Controller
                 'replenishment_items.*',
                 'product_name' => 'inventory.product_name',
                 'sku' => 'inventory.sku',
-                'total' => new \yii\db\Expression('replenishment_items.qty_added * replenishment_items.cost_per_unit')
+                //'total' => new \yii\db\Expression('replenishment_items.qty_added * replenishment_items.cost_per_unit')
             ])
             ->leftJoin('inventory', 'inventory.id = replenishment_items.inventory_id')
             ->where(['transaction_id' => $id])
@@ -215,7 +216,8 @@ class ReplenishmentController extends Controller
                 ->select('SUM(qty_added * cost_per_unit)')
                 ->from('replenishment_items')
                 ->where('transaction_id = replenishment.id')
-        ]);
+        ])
+        ->where(['replenishment.record_status' => 'active']);
 
         // 🔍 Search (product_name or SKU)
         $search = $request->get('search');
@@ -286,5 +288,101 @@ class ReplenishmentController extends Controller
             'success' => true,
             'trnxno' => $prefix . $date . $lastId,
         ];
+    }
+
+    // /**
+    //  * Delete item - DELETE /api/replenishment/delete
+    //  */
+    // public function actionDelete()
+    // {
+    //     if (Yii::$app->request->method !== 'DELETE') {
+    //         Yii::$app->response->statusCode = 405;
+    //         return ['error' => 'Method not allowed'];
+    //     }
+
+    //     $id = Yii::$app->request->getBodyParam('id');
+    //     $item = Inventory::findOne($id);
+
+    //     if (!$item) {
+    //         Yii::$app->response->statusCode = 404;
+    //         return ['error' => 'Item not found'];
+    //     }
+
+    //     if (!$item->delete()) {
+    //         Yii::$app->response->statusCode = 500;
+    //         return ['error' => 'Failed to delete item'];
+    //     }
+
+    //     return ['success' => true, 'message' => 'Item deleted successfully'];
+    // }
+
+    public function actionDelete()
+    {
+        if (Yii::$app->request->method !== 'POST' && Yii::$app->request->method !== 'DELETE') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $id = Yii::$app->request->getBodyParam('id');
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            $replenishment = Replenishment::findOne($id);
+            if (!$replenishment) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 404;
+                return ['success' => false, 'error' => 'Replenishment record not found'];
+            }
+
+            // Safety check: Prevent canceling something that is already inactive
+            if ($replenishment->record_status === 'inactive') { // Or 0, depending on your data type
+                $transaction->rollBack();
+                return ['success' => false, 'error' => 'This replenishment is already inactive'];
+            }
+
+            // 1. Rollback the inventory stock levels
+            $replenishmentItems = ReplenishmentItems::findAll(['transaction_id' => $id]);
+            foreach ($replenishmentItems as $replenishmentItem) {
+                $inventory = Inventory::findOne($replenishmentItem->inventory_id);
+                
+                if ($inventory) {
+                    // Deduct the quantities that were added by this order
+                    $inventory->current_qty -= $replenishmentItem->qty_added;
+
+                    if ($inventory->current_qty < 0) {
+                        $inventory->current_qty = 0; 
+                    }
+
+                    if (!$inventory->save(false)) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to update inventory stock."];
+                    }
+                }
+                
+                // OPTIONAL: Mark the item details as inactive too if you keep statuses there
+                $replenishmentItem->record_status = 'inactive';
+                $replenishmentItem->save(false);
+            }
+
+            // 2. Mark the parent record as inactive instead of calling ->delete()
+            $replenishment->record_status = 'inactive'; // Or use an integer constant like Replenishment::STATUS_INACTIVE
+            // $replenishment->deleted_at = date('Y-m-d H:i:s'); // Useful to track when it happened
+            // $replenishment->deleted_by = Yii::$app->user->id; // Useful to track who did it
+
+            if (!$replenishment->save(false)) {
+                $transaction->rollBack();
+                return ['success' => false, 'error' => 'Failed to cancel the replenishment record'];
+            }
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Replenishment canceled and inventory stock reverted successfully'
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
     }
 }

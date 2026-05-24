@@ -86,7 +86,7 @@ class InventoryController extends Controller
                 ->orFilterWhere(['like', 'total_inventory_value', $search])
                 ->orFilterWhere(['like', 'total_sold', $search])
                 ->orFilterWhere(['like', 'sku', $search])
-                ->orFilterWhere(['like', 'type', $search])
+                // ->orFilterWhere(['like', 'type', $search])
                 ->orFilterWhere(['like', 'status', $search]);
         }
 
@@ -117,7 +117,7 @@ class InventoryController extends Controller
         $allowedSortFields = [
             'id', 'product_name', 'sku', 'cost_per_unit', 'price_per_unit',
             'current_qty', 'total_inventory_cost', 'total_inventory_value',
-            'total_sold', 'date_created', 'date_updated'
+            'date_created', 'date_updated'
         ];
         if (in_array($sortField, $allowedSortFields)) {
             $query->orderBy([$sortField => $sortOrder]);
@@ -185,34 +185,41 @@ class InventoryController extends Controller
         $item = new Inventory();
         $item->load(Yii::$app->request->post(), '');
 
-        // Generate SKU
-        $initials = '';// Get the initials from the product name
-        $words = explode(' ', $item->product_name);
-        foreach ($words as $word) {
-            if (!empty($word)) {
-                $initials .= strtoupper(substr($word, 0, 1)); // Get the first letter of each word
-            }
-        }
-        $month = date('m'); // Get the current month
-        $year = date('y'); // Get the current year
-        $lastId = Inventory::find()
-            ->select('id')
-            ->orderBy(['id' => SORT_DESC])
-            ->limit(1)
-            ->scalar();
-
-        if ($lastId) {
-            $lastId = substr($lastId, -5); // Extract the last 5 digits of the ID
-        } else {
-            $lastId = '00000'; // Set a default value for the first record
-        }
-        $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
-        $item->sku = $sku;
-
         if (!$item->validate()) {
             Yii::$app->response->statusCode = 422;
             return ['error' => 'Validation failed', 'errors' => $item->errors];
         }
+
+        if (empty($item->sku)) {
+            // Generate SKU
+            $initials = '';// Get the initials from the product name
+            $words = explode(' ', $item->product_name);
+            foreach ($words as $word) {
+                if (!empty($word)) {
+                    $initials .= strtoupper(substr($word, 0, 1)); // Get the first letter of each word
+                }
+            }
+            $month = date('m'); // Get the current month
+            $year = date('y'); // Get the current year
+            $lastId = Inventory::find()
+                ->select('id')
+                ->orderBy(['id' => SORT_DESC])
+                ->limit(1)
+                ->scalar();
+
+            if ($lastId) {
+                $lastId = substr($lastId, -5); // Extract the last 5 digits of the ID
+            } else {
+                $lastId = '00000'; // Set a default value for the first record
+            }
+            $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
+            $item->sku = $sku;
+        }
+
+        // if (Inventory::find()->where(['sku' => trim($item->sku)])->exists()) {
+        //     Yii::$app->response->statusCode = 422;
+        //     return ['error' => 'SKU already exists', 'sku' => 'SKU already exists.', 'errors' => ['sku' => ['SKU already exists']]];
+        // }
 
         $item->status = $item->current_qty == 0 ? 'No Stock' : ($item->current_qty < $item->reorder_level ? 'Low Stock' : 'In Stock');
         $item->total_inventory_cost = $item->cost_per_unit * $item->current_qty;
@@ -245,33 +252,35 @@ class InventoryController extends Controller
 
         $item->load(Yii::$app->request->post(), '');
 
-        // Generate SKU
-        $initials = ''; // Get the initials from the product name
-        $words = explode(' ', $item->product_name);
-        foreach ($words as $word) {
-            if (!empty($word)) {
-                $initials .= strtoupper(substr($word, 0, 1)); // Get the first letter of each word
-            }
-        }
-        $month = date('m'); // Get the current month
-        $year = date('y'); // Get the current year
-        $lastId = Inventory::find()
-            ->select('id')
-            ->orderBy(['id' => SORT_DESC])
-            ->limit(1)
-            ->scalar();
-
-        if ($lastId) {
-            $lastId = substr($lastId, -5); // Extract the last 5 digits of the ID
-        } else {
-            $lastId = '00000'; // Set a default value for the first record
-        }
-        $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
-        $item->sku = $sku;
-
         if (!$item->validate()) {
             Yii::$app->response->statusCode = 422;
             return ['error' => 'Validation failed', 'errors' => $item->errors];
+        }
+
+        if (empty($item->sku)) {
+            // Generate SKU
+            $initials = '';// Get the initials from the product name
+            $words = explode(' ', $item->product_name);
+            foreach ($words as $word) {
+                if (!empty($word)) {
+                    $initials .= strtoupper(substr($word, 0, 1)); // Get the first letter of each word
+                }
+            }
+            $month = date('m'); // Get the current month
+            $year = date('y'); // Get the current year
+            $lastId = Inventory::find()
+                ->select('id')
+                ->orderBy(['id' => SORT_DESC])
+                ->limit(1)
+                ->scalar();
+
+            if ($lastId) {
+                $lastId = substr($lastId, -5); // Extract the last 5 digits of the ID
+            } else {
+                $lastId = '00000'; // Set a default value for the first record
+            }
+            $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
+            $item->sku = $sku;
         }
 
         $item->status = $item->current_qty == 0 ? 'No Stock' : ($item->current_qty < $item->reorder_level ? 'Low Stock' : 'In Stock');

@@ -5,12 +5,13 @@ namespace app\models;
 use Yii;
 
 /**
- * This is the model class for table "replenishment".
+ * This is the model class for table "sales".
  *
  * @property int $id
- * @property string|null $supplier
- * @property string|null $reference_no
- * @property string $date_received
+ * @property string|null $customer_name
+ * @property string|null $invoice_no
+ * @property string $date_sold
+ * @property string|null $payment_method
  * @property string $remarks
  * @property string $date_created
  * @property string $date_updated
@@ -18,8 +19,10 @@ use Yii;
  * @property int|null $updated_by
  * @property string|null $hash
  * @property string|null $record_status
+ *
+ * @property SalesItems[] $salesItems
  */
-class Replenishment extends \yii\db\ActiveRecord
+class Sales extends \yii\db\ActiveRecord
 {
 
     /**
@@ -33,7 +36,7 @@ class Replenishment extends \yii\db\ActiveRecord
      */
     public static function tableName()
     {
-        return 'replenishment';
+        return 'sales';
     }
 
     /**
@@ -42,14 +45,17 @@ class Replenishment extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['supplier', 'reference_no', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
+            [['customer_name', 'invoice_no', 'payment_method', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'Active'],
-            [['date_received', 'date_created', 'date_updated'], 'safe'],
-            [['record_status', 'remarks'], 'string'],
-            [['supplier', 'hash'], 'string', 'max' => 255],
-            [['reference_no'], 'string', 'max' => 100],
+            [['date_sold', 'date_created', 'date_updated'], 'safe'],
+            [['remarks'], 'required'],
+            [['remarks', 'record_status'], 'string'],
             [['added_by', 'updated_by'], 'integer'],
+            [['customer_name', 'hash'], 'string', 'max' => 255],
+            [['invoice_no'], 'string', 'max' => 100],
+            [['payment_method'], 'string', 'max' => 50],
             ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
+            [['invoice_no'], 'unique'],
         ];
     }
 
@@ -60,9 +66,10 @@ class Replenishment extends \yii\db\ActiveRecord
     {
         return [
             'id' => 'ID',
-            'supplier' => 'Supplier',
-            'reference_no' => 'Reference No',
-            'date_received' => 'Date Received',
+            'customer_name' => 'Customer Name',
+            'invoice_no' => 'Invoice No',
+            'date_sold' => 'Date Sold',
+            'payment_method' => 'Payment Method',
             'remarks' => 'Remarks',
             'date_created' => 'Date Created',
             'date_updated' => 'Date Updated',
@@ -72,6 +79,17 @@ class Replenishment extends \yii\db\ActiveRecord
             'record_status' => 'Record Status',
         ];
     }
+
+    /**
+     * Gets query for [[SalesItems]].
+     *
+     * @return \yii\db\ActiveQuery
+     */
+    public function getSalesItems()
+    {
+        return $this->hasMany(SalesItems::class, ['sales_id' => 'id']);
+    }
+
 
     /**
      * column record_status ENUM value labels

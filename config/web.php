@@ -57,31 +57,32 @@ $config = [
             'showScriptName' => false,
             'rules' => [
                 // API routes for Employee
-                'POST api/employee/login' => 'employee/login',
-                'POST api/employee/register' => 'employee/register',
-                'GET api/employee/profile' => 'employee/profile',
-                'GET api/employee/list' => 'employee/list',
-                'PUT api/employee/update' => 'employee/update',
-                'DELETE api/employee/delete' => 'employee/delete',
-                // API routes for Inventory
-                'GET api/inventory/list' => 'inventory/list',
-                'POST api/inventory/checksku' => 'inventory/checksku',
-                'POST api/inventory/create' => 'inventory/create',
-                'PUT api/inventory/update' => 'inventory/update',
-                'PATCH api/inventory/update' => 'inventory/update',
-                'DELETE api/inventory/delete' => 'inventory/delete',
+                'POST,OPTIONS api/employee/login' => 'employee/login',
+                'POST,OPTIONS api/employee/register' => 'employee/register',
+                'GET,OPTIONS api/employee/profile' => 'employee/profile',
+                'GET,OPTIONS api/employee/list' => 'employee/list',
+                'PUT,OPTIONS api/employee/update' => 'employee/update',
+                'DELETE,OPTIONS api/employee/delete' => 'employee/delete',
+                
+                // API routes for Inventory 👇 CHANGED THESE TO INCLUDE OPTIONS
+                'GET,OPTIONS api/inventory/list' => 'inventory/list',
+                'POST,OPTIONS api/inventory/checksku' => 'inventory/checksku',
+                'POST,OPTIONS api/inventory/create' => 'inventory/create',
+                'PUT,OPTIONS api/inventory/update' => 'inventory/update',
+                'PATCH,OPTIONS api/inventory/update' => 'inventory/update',
+                'DELETE,OPTIONS api/inventory/delete' => 'inventory/delete',
+                
                 // API routes for Replenishment
-                'GET api/replenishment/list' => 'replenishment/list',
-                'GET api/replenishment/view' => 'replenishment/view',
-                'POST api/replenishment/create' => 'replenishment/create',
-                'PUT api/replenishment/update' => 'replenishment/update',
-                'DELETE api/replenishment/delete' => 'replenishment/delete',
-                'GET api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
-                // API routes for Replenishment Items
-                // 'GET api/replenishment-items/list' => 'replenishment-items/list',
-                // 'POST api/replenishment-items/create' => 'replenishment-items/create',
-                // 'PUT api/replenishment-items/update' => 'replenishment-items/update',
-                // 'DELETE api/replenishment-items/delete' => 'replenishment-items/delete',
+                'GET,OPTIONS api/replenishment/list' => 'replenishment/list',
+                'GET,OPTIONS api/replenishment/view' => 'replenishment/view',
+                'POST,OPTIONS api/replenishment/create' => 'replenishment/create',
+                'PUT,OPTIONS api/replenishment/update' => 'replenishment/update',
+                'DELETE,OPTIONS api/replenishment/delete' => 'replenishment/delete',
+                'GET,OPTIONS api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
+
+                // API routes for Sales
+                'GET,OPTIONS api/sales/list' => 'sales/list',
+                'POST,OPTIONS api/sales/create' => 'sales/create',
             ],
         ],
         'formatter' => [
@@ -92,8 +93,8 @@ $config = [
     'as corsFilter' => [
         'class' => Cors::class,
         'cors' => [
-            'Origin' => ['http://localhost:3000'], // allow React/Vue dev server
-            'Access-Control-Request-Method' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+            'Origin' => ['http://localhost:3000'],
+            'Access-Control-Request-Method' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
             'Access-Control-Request-Headers' => ['*'],
             'Access-Control-Allow-Credentials' => true,
         ],

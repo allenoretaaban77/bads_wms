@@ -26,8 +26,8 @@ use Yii;
  * @property int|null $total_sold
  * @property string $date_created
  * @property string $date_updated
- * @property int $added_by
- * @property int $updated_by
+ * @property int|null $added_by
+ * @property int|null $updated_by
  * @property string|null $hash
  * @property string|null $record_status
  */
@@ -58,6 +58,7 @@ class Inventory extends \yii\db\ActiveRecord
             [['total_sold'], 'default', 'value' => 0],
             [['record_status'], 'default', 'value' => 'Active'],
             //[['product_name', 'sku', 'cost_per_unit', 'price_per_unit', 'initial_qty', 'reorder_level', 'current_qty', 'type', 'rack', 'shelf', 'box', 'status', 'remarks'], 'required'],
+            [['product_name', 'sku', 'type', 'cost_per_unit', 'price_per_unit', 'initial_qty', 'reorder_level', 'current_qty'], 'required'],
             [['cost_per_unit', 'price_per_unit', 'total_inventory_cost', 'total_inventory_value'], 'number'],
             [['initial_qty', 'reorder_level', 'current_qty', 'total_sold', 'added_by', 'updated_by'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
@@ -66,7 +67,7 @@ class Inventory extends \yii\db\ActiveRecord
             [['sku'], 'string', 'max' => 100],
             [['type', 'rack', 'shelf', 'box', 'status'], 'string', 'max' => 50],
             ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
-            [['sku'], 'unique', 'targetClass' => '\app\models\Inventory', 'message' => 'SKU must be unique'],
+            [['sku'], 'unique', 'targetClass' => '\app\models\Inventory', 'message' => 'SKU already exists'],
         ];
     }
 
