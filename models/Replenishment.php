@@ -42,6 +42,7 @@ class Replenishment extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
+            [['supplier', 'reference_no', 'date_received'], 'required'],
             [['supplier', 'reference_no', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'Active'],
             [['date_received', 'date_created', 'date_updated'], 'safe'],
@@ -50,6 +51,7 @@ class Replenishment extends \yii\db\ActiveRecord
             [['reference_no'], 'string', 'max' => 100],
             [['added_by', 'updated_by'], 'integer'],
             ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
+            [['reference_no'], 'unique', 'targetClass' => '\app\models\Replenishment', 'message' => 'Reference number already exists'],
         ];
     }
 
@@ -60,8 +62,8 @@ class Replenishment extends \yii\db\ActiveRecord
     {
         return [
             'id' => 'ID',
-            'supplier' => 'Supplier',
-            'reference_no' => 'Reference No',
+            'supplier' => 'Supplier Name',
+            'reference_no' => 'Reference Number',
             'date_received' => 'Date Received',
             'remarks' => 'Remarks',
             'date_created' => 'Date Created',

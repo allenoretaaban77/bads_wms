@@ -79,7 +79,7 @@ class Inventory extends \yii\db\ActiveRecord
         return [
             'id' => 'ID',
             'product_name' => 'Product Name',
-            'sku' => 'Sku',
+            'sku' => 'SKU',
             'cost_per_unit' => 'Cost Per Unit',
             'price_per_unit' => 'Price Per Unit',
             'initial_qty' => 'Initial Qty',

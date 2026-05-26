@@ -70,73 +70,95 @@ class ReplenishmentController extends Controller
             return ['error' => 'Method not allowed'];
         }
 
-        // $item = new Replenishment();
-        // $item->load(Yii::$app->request->post(), '');
-        // return ['data' => $item];
+        $data = new Replenishment();
+        $data->load(Yii::$app->request->post(), '');
+
+        if (!$data->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $data->errors];
+        }
 
         $request = Yii::$app->request;
-        $data = $request->post();
+        $items = $request->post();
+        // var_dump($items);
 
-        $transaction = Yii::$app->db->beginTransaction();
-        try {
-            $replenishment = new Replenishment();
-            $replenishment->supplier = $data['supplier'] ?? null;
-            $replenishment->reference_no = $data['reference_no'] ?? null;
-            $replenishment->date_received = $data['date_received'] ?? date('Y-m-d');
-            $replenishment->remarks = $data['remarks'] ?? null;
-            $replenishment->date_created = date('Y-m-d H:i:s');
-            $replenishment->added_by = $data['added_by'] ?? null;
+        if (!isset($items['items']) || !is_array($items['items']) || count($items['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        } else {
+            $transaction = Yii::$app->db->beginTransaction();
+            try {
+                $replenishment = new Replenishment();
+                $replenishment->supplier = $data['supplier'] ?? null;
+                $replenishment->reference_no = $data['reference_no'] ?? null;
+                $replenishment->date_received = $data['date_received'] ?? date('Y-m-d');
+                $replenishment->remarks = $data['remarks'] ?? null;
+                $replenishment->date_created = date('Y-m-d H:i:s');
+                $replenishment->added_by = $data['added_by'] ?? null;
 
-            if (!$replenishment->save()) {
-                $transaction->rollBack();
-                return ['success' => false, 'errors' => $replenishment->getErrors()];
-            }
-            Yii::debug($replenishment->getErrors(), __METHOD__);
+                if (!$replenishment->save()) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'errors' => $replenishment->getErrors()];
+                }
+                Yii::debug($replenishment->getErrors(), __METHOD__);
 
-            if (isset($data['items']) && is_array($data['items'])) {
-                foreach ($data['items'] as $itemData) {
-                    // Try to find the item in inventory by name
-                    $inventory = Inventory::findOne(['product_name' => $itemData['item_name']]);
-                    
-                    if (!$inventory) {
-                        $transaction->rollBack();
-                        return ['success' => false, 'error' => "Item '{$itemData['item_name']}' not found in inventory"];
-                    }
+                if (isset($items['items']) && is_array($items['items'])) {
+                    foreach ($items['items'] as $itemData) {
+                        // Try to find the item in inventory by name
+                        $inventory = Inventory::findOne(['product_name' => $itemData['item_name']]);
+                        
+                        if (!$inventory) {
+                            $transaction->rollBack();
+                            return ['success' => false, 'error' => "Item '{$itemData['item_name']}' not found in inventory"];
+                        }
 
-                    $replenishmentItem = new ReplenishmentItems();
-                    $replenishmentItem->transaction_id = $replenishment->id;
-                    $replenishmentItem->inventory_id = $inventory->id;
-                    $replenishmentItem->qty_added = (int)($itemData['quantity'] ?? 0);
-                    $replenishmentItem->cost_per_unit = (float)($itemData['cost'] ?? 0);
+                        if ($itemData['quantity'] == "" || $itemData['quantity'] < 1) {
+                            $transaction->rollBack();
+                            Yii::$app->response->statusCode = 422;
+                            return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Invalid quantity.']]];
+                        }
 
-                    if (!$replenishmentItem->save()) {
-                        $transaction->rollBack();
-                        return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
-                    }
+                        if ($itemData['cost'] == "" || $itemData['cost'] < 1) {
+                            $transaction->rollBack();
+                            Yii::$app->response->statusCode = 422;
+                            return ['error' => 'Validation failed', 'errors' => ['cost_'.$inventory->id => ['Invalid cost.']]];
+                        }
 
-                    // Update Inventory current_qty and cost_per_unit
-                    // $inventory->current_qty += $replenishmentItem->qty_added;
-                    $inventory->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $replenishmentItem->qty_added]);
-                    if ($replenishmentItem->cost_per_unit > 0) {
-                        $inventory->cost_per_unit = $replenishmentItem->cost_per_unit;
-                    }
-                    
-                    if (!$inventory->save(false)) { // Save without validation to be faster
-                        $transaction->rollBack();
-                        return ['success' => false, 'error' => "Failed to update inventory for '{$itemData['item_name']}'"];
+                        $replenishmentItem = new ReplenishmentItems();
+                        $replenishmentItem->transaction_id = $replenishment->id;
+                        $replenishmentItem->inventory_id = $inventory->id;
+                        $replenishmentItem->qty_added = (int)($itemData['quantity'] ?? 0);
+                        $replenishmentItem->cost_per_unit = (float)($itemData['cost'] ?? 0);
+
+                        if (!$replenishmentItem->save()) {
+                            $transaction->rollBack();
+                            return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
+                        }
+
+                        // Update Inventory current_qty and cost_per_unit
+                        // $inventory->current_qty += $replenishmentItem->qty_added;
+                        $inventory->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $replenishmentItem->qty_added]);
+                        if ($replenishmentItem->cost_per_unit > 0) {
+                            $inventory->cost_per_unit = $replenishmentItem->cost_per_unit;
+                        }
+                        
+                        if (!$inventory->save(false)) { // Save without validation to be faster
+                            $transaction->rollBack();
+                            return ['success' => false, 'error' => "Failed to update inventory for '{$itemData['item_name']}'"];
+                        }
                     }
                 }
-            }
 
-            $transaction->commit();
-            return [
-                'success' => true,
-                'message' => 'Replenishment created successfully',
-                'id' => $replenishment->id
-            ];
-        } catch (\Exception $e) {
-            $transaction->rollBack();
-            return ['success' => false, 'error' => $e->getMessage()];
+                $transaction->commit();
+                return [
+                    'success' => true,
+                    'message' => 'Replenishment created successfully',
+                    'id' => $replenishment->id
+                ];
+            } catch (\Exception $e) {
+                $transaction->rollBack();
+                return ['success' => false, 'error' => $e->getMessage()];
+            }
         }
     }
 
