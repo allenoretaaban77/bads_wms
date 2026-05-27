@@ -156,7 +156,7 @@ class Inventory extends \yii\db\ActiveRecord
     //     $fields = parent::fields();
 
     //     $fields['product_name_searched'] = function ($model) {
-    //         return $model->product_name == 0 ? 'No Stock' : $model->status;
+    //         return $model->product_name == '';
     //     };
 
     //     return $fields;

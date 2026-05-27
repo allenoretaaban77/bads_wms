@@ -63,6 +63,114 @@ class ReplenishmentController extends Controller
         return true; // allow action to run
     }
 
+    public function actionList()
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $query = Replenishment::find()->select([
+            'replenishment.*',
+            'amount' => (new \yii\db\Query())
+                ->select('SUM(qty_added * cost_per_unit)')
+                ->from('replenishment_items')
+                ->where('transaction_id = replenishment.id')
+        ])
+        ->where(['replenishment.record_status' => 'active']);
+
+        // 🔍 Search (product_name or SKU)
+        $search = $request->get('search');
+        if (!empty($search)) {
+            $query->andFilterWhere([
+                'or',
+                ['like', 'supplier', $search],
+                ['like', 'reference_no', $search],
+                ['like', 'date_received', $search],
+            ]);
+        }
+
+        // 🎯 Filters
+        // $filters = [
+        //     'type' => $request->get('supplier'),
+        // ];
+        // foreach ($filters as $field => $value) {
+        //     if (!empty($value)) {
+        //         $query->andWhere([$field => $value]);
+        //     }
+        // }
+
+        // 📄 Pagination
+        $page = (int)$request->get('page', 1);
+        $pageSize = (int)$request->get('pageSize', 10);
+        $offset = ($page - 1) * $pageSize;
+
+        // 📊 Sorting (default id ASC)
+        $sortField = $request->get('sort', 'id');
+        $sortOrder = strtolower($request->get('order', 'asc')) === 'desc' ? SORT_DESC : SORT_ASC;
+
+        $allowedSortFields = [
+            'id', 'supplier', 'reference_no', 'date_received', 'amount',
+        ];
+        if (in_array($sortField, $allowedSortFields)) {
+            $query->orderBy([$sortField => $sortOrder]);
+        } else {
+            $query->orderBy(['id' => SORT_DESC]);
+        }
+
+        // Execute query
+        $totalCount = $query->count();
+        // $items = $query->offset($offset)->limit($pageSize)->all();
+        $items = $query->offset($offset)->limit($pageSize)->asArray()->all();
+
+        return [
+            'success' => true,
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'totalCount' => $totalCount,
+            'totalPages' => ceil($totalCount / $pageSize),
+            'sortField' => $sortField,
+            'sortOrder' => $sortOrder === SORT_ASC ? 'asc' : 'desc',
+            'count' => count($items),
+            'data' => $items,
+        ];
+    }
+
+    public function actionView($id)
+    {
+        $replenishment = Replenishment::find()
+            ->where(['id' => $id])
+            ->asArray()
+            ->one();
+
+        if (!$replenishment) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Replenishment transaction not found'];
+        }
+
+        $items = ReplenishmentItems::find()
+            ->select([
+                'replenishment_items.*',
+                'product_name' => 'inventory.product_name',
+                'current_qty' => 'inventory.current_qty',
+                'reorder_level' => 'inventory.reorder_level',
+                'sku' => 'inventory.sku',
+                //'total' => new \yii\db\Expression('replenishment_items.qty_added * replenishment_items.cost_per_unit')
+            ])
+            ->leftJoin('inventory', 'inventory.id = replenishment_items.inventory_id')
+            ->where(['transaction_id' => $id])
+            ->asArray()
+            ->all();
+
+        $replenishment['items'] = $items;
+
+        return [
+            'success' => true,
+            'data' => $replenishment
+        ];
+    }
+
     public function actionCreate()
     {
         if (Yii::$app->request->method !== 'POST') {
@@ -168,16 +276,17 @@ class ReplenishmentController extends Controller
             return ['error' => 'Method not allowed'];
         }
 
+        $id = Yii::$app->request->getBodyParam('id');
         $reference_no = Yii::$app->request->getBodyParam('reference_no');
-        $replenishment = Replenishment::findOne(['reference_no' => $reference_no]);
-        if (!$replenishment) {
-            Yii::$app->response->statusCode = 404;
-            return ['error' => "Replenishment transaction number '{$reference_no}' not found."];
-        }
-
         $request = Yii::$app->request;
         $data = $request->post();
+        
+        // if (!$replenishment) {
+        //     Yii::$app->response->statusCode = 404;
+        //     return ['error' => 'Validation failed.', 'errors' => ['reference_no' => ["Replenishment transaction number not found."]]];
+        // }
 
+        $replenishment = Replenishment::findOne(['id' => $id]);
         $replenishment->load($data, '');
         if (!$replenishment->validate()) {
             Yii::$app->response->statusCode = 422;
@@ -238,7 +347,7 @@ class ReplenishmentController extends Controller
                     return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
                 }
 
-                // Update inventory
+                // Update Inventory current_qty and cost_per_unit
                 $inventory->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $replenishmentItem->qty_added]);
                 if ($replenishmentItem->cost_per_unit > 0) {
                     $inventory->cost_per_unit = $replenishmentItem->cost_per_unit;
@@ -250,6 +359,16 @@ class ReplenishmentController extends Controller
                 }
             }
 
+            // ✅ Insert into audit log after successful update
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'replenishment',
+                'entity_id' => $replenishment->id,
+                'action' => 'update',
+                'new_data' => json_encode($replenishment->attributes),
+                'updated_by' => $replenishment->added_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
             $transaction->commit();
             return [
                 'success' => true,
@@ -260,156 +379,6 @@ class ReplenishmentController extends Controller
             $transaction->rollBack();
             return ['success' => false, 'error' => $e->getMessage()];
         }
-    }
-
-    public function actionSaveItems($replenishmentId)
-    {
-        $replenishmentItems = Yii::$app->request->post('replenishment_items');
-
-        if (!$replenishmentItems) {
-            Yii::$app->response->statusCode = 400;
-            return ['error' => 'No items provided'];
-        }
-
-        foreach ($replenishmentItems as $itemData) {
-            $item = new ReplenishmentItem();
-            $item->replenishment_id = $replenishmentId;
-            $item->inventory_id = $itemData['inventory_id'];
-            $item->quantity = $itemData['quantity'];
-            $item->save();
-        }
-
-        return ['success' => true];
-    }
-
-    public function actionView($id)
-    {
-        $replenishment = Replenishment::find()
-            ->where(['id' => $id])
-            ->asArray()
-            ->one();
-
-        if (!$replenishment) {
-            Yii::$app->response->statusCode = 404;
-            return ['success' => false, 'error' => 'Replenishment transaction not found'];
-        }
-
-        $items = ReplenishmentItems::find()
-            ->select([
-                'replenishment_items.*',
-                'product_name' => 'inventory.product_name',
-                'sku' => 'inventory.sku',
-                //'total' => new \yii\db\Expression('replenishment_items.qty_added * replenishment_items.cost_per_unit')
-            ])
-            ->leftJoin('inventory', 'inventory.id = replenishment_items.inventory_id')
-            ->where(['transaction_id' => $id])
-            ->asArray()
-            ->all();
-
-
-        $replenishment['items'] = $items;
-
-        return [
-            'success' => true,
-            'data' => $replenishment
-        ];
-    }
-
-    protected function findModel($id)
-    {
-        if (($model = Replenishment::findOne(['id' => $id])) !== null) {
-            return $model;
-        }
-
-        throw new NotFoundHttpException('The requested page does not exist.');
-    }
-
-    public function actionList()
-    {
-        if (Yii::$app->request->method !== 'GET') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        $request = Yii::$app->request;
-        $query = Replenishment::find()->select([
-            'replenishment.*',
-            'amount' => (new \yii\db\Query())
-                ->select('SUM(qty_added * cost_per_unit)')
-                ->from('replenishment_items')
-                ->where('transaction_id = replenishment.id')
-        ])
-        ->where(['replenishment.record_status' => 'active']);
-
-        // 🔍 Search (product_name or SKU)
-        $search = $request->get('search');
-        if (!empty($search)) {
-            $query->andFilterWhere([
-                'or',
-                ['like', 'supplier', $search],
-                ['like', 'reference_no', $search],
-                ['like', 'date_received', $search],
-            ]);
-        }
-
-        // 🎯 Filters
-        // $filters = [
-        //     'type' => $request->get('supplier'),
-        // ];
-        // foreach ($filters as $field => $value) {
-        //     if (!empty($value)) {
-        //         $query->andWhere([$field => $value]);
-        //     }
-        // }
-
-        // 📄 Pagination
-        $page = (int)$request->get('page', 1);
-        $pageSize = (int)$request->get('pageSize', 10);
-        $offset = ($page - 1) * $pageSize;
-
-        // 📊 Sorting (default id ASC)
-        $sortField = $request->get('sort', 'id');
-        $sortOrder = strtolower($request->get('order', 'asc')) === 'desc' ? SORT_DESC : SORT_ASC;
-
-        $allowedSortFields = [
-            'id', 'supplier', 'reference_no', 'date_received', 'amount',
-        ];
-        if (in_array($sortField, $allowedSortFields)) {
-            $query->orderBy([$sortField => $sortOrder]);
-        } else {
-            $query->orderBy(['id' => SORT_DESC]);
-        }
-
-        // Execute query
-        $totalCount = $query->count();
-        // $items = $query->offset($offset)->limit($pageSize)->all();
-        $items = $query->offset($offset)->limit($pageSize)->asArray()->all();
-
-        return [
-            'success' => true,
-            'page' => $page,
-            'pageSize' => $pageSize,
-            'totalCount' => $totalCount,
-            'totalPages' => ceil($totalCount / $pageSize),
-            'sortField' => $sortField,
-            'sortOrder' => $sortOrder === SORT_ASC ? 'asc' : 'desc',
-            'count' => count($items),
-            'data' => $items,
-        ];
-    }
-
-    public function actionGeneratetrnxno()
-    {   
-        $prefix = 'RPL';
-        $date = date('ymd');
-        $count = Replenishment::find()->orderBy(['id' => SORT_DESC])->limit(1)->one();
-        $lastId = Yii::$app->db->createCommand("SELECT MAX(id) FROM replenishment")->queryScalar();
-        $lastId = str_pad($lastId + 1, 4, '0', STR_PAD_LEFT);
-
-        return [
-            'success' => true,
-            'trnxno' => $prefix . $date . $lastId,
-        ];
     }
 
     public function actionDelete()
@@ -490,4 +459,46 @@ class ReplenishmentController extends Controller
         }
     }
 
+    public function actionGeneratetrnxno()
+    {   
+        $prefix = 'RPL';
+        $date = date('ymd');
+        $count = Replenishment::find()->orderBy(['id' => SORT_DESC])->limit(1)->one();
+        $lastId = Yii::$app->db->createCommand("SELECT MAX(id) FROM replenishment")->queryScalar();
+        $lastId = str_pad($lastId + 1, 4, '0', STR_PAD_LEFT);
+
+        return [
+            'success' => true,
+            'trnxno' => $prefix . $date . $lastId,
+        ];
+    }
+
+    protected function findModel($id)
+    {
+        if (($model = Replenishment::findOne(['id' => $id])) !== null) {
+            return $model;
+        }
+
+        throw new NotFoundHttpException('The requested page does not exist.');
+    }
+
+    public function actionSaveItems($replenishmentId)
+    {
+        $replenishmentItems = Yii::$app->request->post('replenishment_items');
+
+        if (!$replenishmentItems) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'No items provided'];
+        }
+
+        foreach ($replenishmentItems as $itemData) {
+            $item = new ReplenishmentItem();
+            $item->replenishment_id = $replenishmentId;
+            $item->inventory_id = $itemData['inventory_id'];
+            $item->quantity = $itemData['quantity'];
+            $item->save();
+        }
+
+        return ['success' => true];
+    }
 }

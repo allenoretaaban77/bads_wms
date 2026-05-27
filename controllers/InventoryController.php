@@ -231,23 +231,6 @@ class InventoryController extends Controller
         return ['success' => true, 'data' => $item];
     }
 
-    public function actionChecksku()
-    {
-        if (Yii::$app->request->method !== 'POST') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        $sku = Yii::$app->request->post('sku');
-        $existingItem = Inventory::find()->where(['sku' => $sku])->one();
-
-        if ($existingItem) {
-            return ['exists' => true];
-        } else {
-            return ['exists' => false];
-        }
-    }
-
     /**
      * Create new item - POST /api/inventory/create
      */
@@ -412,12 +395,29 @@ class InventoryController extends Controller
             'entity' => 'inventory',
             'entity_id' => $id,
             'action' => 'delete',
-            'old_data' => $oldData,
+            'old_data' => json_encode($oldData),
             'new_data' => null,
             'updated_by' => $employee_id,
             'updated_at' => date('Y-m-d H:i:s'),
         ])->execute();
 
         return ['success' => true, 'message' => 'Item deleted successfully'];
+    }
+
+    public function actionChecksku()
+    {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $sku = Yii::$app->request->post('sku');
+        $existingItem = Inventory::find()->where(['sku' => $sku])->one();
+
+        if ($existingItem) {
+            return ['exists' => true];
+        } else {
+            return ['exists' => false];
+        }
     }
 }
