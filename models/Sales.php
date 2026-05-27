@@ -45,10 +45,10 @@ class Sales extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
+            [['customer_name', 'invoice_no', 'payment_method'], 'required'],
             [['customer_name', 'invoice_no', 'payment_method', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'Active'],
             [['date_sold', 'date_created', 'date_updated'], 'safe'],
-            [['remarks'], 'required'],
             [['remarks', 'record_status'], 'string'],
             [['added_by', 'updated_by'], 'integer'],
             [['customer_name', 'hash'], 'string', 'max' => 255],
@@ -56,6 +56,7 @@ class Sales extends \yii\db\ActiveRecord
             [['payment_method'], 'string', 'max' => 50],
             ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
             [['invoice_no'], 'unique'],
+            [['invoice_no'], 'unique', 'targetClass' => '\app\models\Sales', 'message' => 'Invoice number already exists'],
         ];
     }
 

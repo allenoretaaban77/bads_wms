@@ -62,7 +62,6 @@ class InventoryController extends Controller
         return true; // allow action to run
     }
 
-
     /**
      * List all inventory items - GET /api/inventory/list
      */
@@ -118,6 +117,83 @@ class InventoryController extends Controller
             'id', 'product_name', 'sku', 'cost_per_unit', 'price_per_unit',
             'current_qty', 'total_inventory_cost', 'total_inventory_value',
             'date_created', 'date_updated'
+        ];
+        if (in_array($sortField, $allowedSortFields)) {
+            $query->orderBy([$sortField => $sortOrder]);
+        } else {
+            $query->orderBy(['id' => SORT_DESC]);
+        }
+
+        // Execute query
+        $totalCount = $query->count();
+        $items = $query->offset($offset)->limit($pageSize)->all();
+
+        return [
+            'success' => true,
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'totalCount' => $totalCount,
+            'totalPages' => ceil($totalCount / $pageSize),
+            'sortField' => $sortField,
+            'sortOrder' => $sortOrder === SORT_ASC ? 'asc' : 'desc',
+            'count' => count($items),
+            'data' => $items,
+        ];
+    }
+
+
+    public function actionListsearch()
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $query = Inventory::find();
+
+        // 🔍 Search (product_name or SKU)
+        $search = $request->get('search');
+        if (!empty($search)) {
+            $query->andFilterWhere(['like', 'product_name', $search])
+                ->orFilterWhere(['like', 'cost_per_unit', $search])
+                ->orFilterWhere(['like', 'price_per_unit', $search])
+                ->orFilterWhere(['like', 'total_inventory_cost', $search])
+                ->orFilterWhere(['like', 'total_inventory_value', $search])
+                ->orFilterWhere(['like', 'total_sold', $search])
+                ->orFilterWhere(['like', 'sku', $search])
+                // ->orFilterWhere(['like', 'type', $search])
+                ->orFilterWhere(['like', 'status', $search]);
+        }
+
+        // 🎯 Filters
+        $filters = [
+            'type' => $request->get('type'),
+            'rack' => $request->get('rack'),
+            'shelf' => $request->get('shelf'),
+            'box' => $request->get('box'),
+            'status' => $request->get('status'),
+            'record_status' => $request->get('record_status'),
+        ];
+        foreach ($filters as $field => $value) {
+            if (!empty($value)) {
+                $query->andWhere([$field => $value]);
+            }
+        }
+
+        // 📄 Pagination
+        $page = (int)$request->get('page', 1);
+        $pageSize = (int)$request->get('pageSize', 10);
+        $offset = ($page - 1) * $pageSize;
+
+        // 📊 Sorting (default id ASC)
+        $sortField = $request->get('sort', 'id');
+        $sortOrder = strtolower($request->get('order', 'asc')) === 'desc' ? SORT_DESC : SORT_ASC;
+
+        $allowedSortFields = [
+            'id', 'product_name', 'sku', 'cost_per_unit', 'price_per_unit',
+            'current_qty', 'total_inventory_cost', 'total_inventory_value',
+            'date_created', 'date_updated', 'reoder_level'
         ];
         if (in_array($sortField, $allowedSortFields)) {
             $query->orderBy([$sortField => $sortOrder]);
@@ -212,23 +288,24 @@ class InventoryController extends Controller
             } else {
                 $lastId = '00000'; // Set a default value for the first record
             }
-            $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
+            $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId + 1, 5, '0', STR_PAD_LEFT);
             $item->sku = $sku;
         }
-
-        // if (Inventory::find()->where(['sku' => trim($item->sku)])->exists()) {
-        //     Yii::$app->response->statusCode = 422;
-        //     return ['error' => 'SKU already exists', 'sku' => 'SKU already exists.', 'errors' => ['sku' => ['SKU already exists']]];
-        // }
-
-        $item->status = $item->current_qty == 0 ? 'No Stock' : ($item->current_qty < $item->reorder_level ? 'Low Stock' : 'In Stock');
-        $item->total_inventory_cost = $item->cost_per_unit * $item->current_qty;
-        $item->total_inventory_value = $item->price_per_unit * $item->current_qty;
 
         if (!$item->save()) {
             Yii::$app->response->statusCode = 500;
             return ['error' => 'Failed to save item'];
         }
+
+        // ✅ Insert into audit log after successful update
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity' => 'inventory',
+            'entity_id' => $item->id,
+            'action' => 'create',
+            'new_data' => json_encode($item->attributes),
+            'updated_by' => $item->added_by,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ])->execute();
 
         return ['success' => true, 'data' => $item];
     }
@@ -249,6 +326,8 @@ class InventoryController extends Controller
             Yii::$app->response->statusCode = 404;
             return ['error' => 'Item not found'];
         }
+
+        $oldData = $item->attributes; // Capture old values before update
 
         $item->load(Yii::$app->request->post(), '');
 
@@ -279,18 +358,25 @@ class InventoryController extends Controller
             } else {
                 $lastId = '00000'; // Set a default value for the first record
             }
-            $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId, 5, '0', STR_PAD_LEFT);
+            $sku = strtoupper($initials) . '-' . $month . $year . '-' . str_pad($lastId + 1, 5, '0', STR_PAD_LEFT);
             $item->sku = $sku;
         }
-
-        $item->status = $item->current_qty == 0 ? 'No Stock' : ($item->current_qty < $item->reorder_level ? 'Low Stock' : 'In Stock');
-        $item->total_inventory_cost = $item->cost_per_unit * $item->current_qty;
-        $item->total_inventory_value = $item->price_per_unit * $item->current_qty;
 
         if (!$item->save()) {
             Yii::$app->response->statusCode = 500;
             return ['error' => 'Failed to save item'];
         }
+
+        // ✅ Insert into audit log after successful update
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity' => 'inventory',
+            'entity_id' => $item->id,
+            'action' => 'update',
+            'old_data' => json_encode($oldData),
+            'new_data' => json_encode($item->attributes),
+            'updated_by' => $item->updated_by,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ])->execute();
 
         return ['success' => true, 'data' => $item];
     }
@@ -307,16 +393,30 @@ class InventoryController extends Controller
 
         $id = Yii::$app->request->getBodyParam('id');
         $item = Inventory::findOne($id);
+        $employee_id = Yii::$app->request->getBodyParam('employee_id');
 
         if (!$item) {
             Yii::$app->response->statusCode = 404;
             return ['error' => 'Item not found'];
         }
 
+        $oldData = $item->attributes; // Capture data before deletion
+
         if (!$item->delete()) {
             Yii::$app->response->statusCode = 500;
             return ['error' => 'Failed to delete item'];
-        }
+        }    
+
+        // ✅ Insert into audit log after successful delete
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity' => 'inventory',
+            'entity_id' => $id,
+            'action' => 'delete',
+            'old_data' => $oldData,
+            'new_data' => null,
+            'updated_by' => $employee_id,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ])->execute();
 
         return ['success' => true, 'message' => 'Item deleted successfully'];
     }

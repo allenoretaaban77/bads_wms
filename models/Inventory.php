@@ -56,18 +56,19 @@ class Inventory extends \yii\db\ActiveRecord
         return [
             [['total_inventory_cost', 'total_inventory_value', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['total_sold'], 'default', 'value' => 0],
-            [['record_status'], 'default', 'value' => 'Active'],
+            [['record_status'], 'default', 'value' => 'active'],
             //[['product_name', 'sku', 'cost_per_unit', 'price_per_unit', 'initial_qty', 'reorder_level', 'current_qty', 'type', 'rack', 'shelf', 'box', 'status', 'remarks'], 'required'],
-            [['product_name', 'sku', 'type', 'cost_per_unit', 'price_per_unit', 'initial_qty', 'reorder_level', 'current_qty'], 'required'],
-            [['cost_per_unit', 'price_per_unit', 'total_inventory_cost', 'total_inventory_value'], 'number'],
-            [['initial_qty', 'reorder_level', 'current_qty', 'total_sold', 'added_by', 'updated_by'], 'integer'],
+            [['product_name', 'type', 'cost_per_unit', 'price_per_unit', 'initial_qty', 'reorder_level', 'current_qty'], 'required'],
+            [['total_sold', 'added_by', 'updated_by'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
             [['record_status', 'remarks'], 'string'],
             [['product_name', 'hash'], 'string', 'max' => 255],
             [['sku'], 'string', 'max' => 100],
             [['type', 'rack', 'shelf', 'box', 'status'], 'string', 'max' => 50],
-            ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
+            // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
             [['sku'], 'unique', 'targetClass' => '\app\models\Inventory', 'message' => 'SKU already exists'],
+            [['cost_per_unit', 'price_per_unit'], 'number', 'min' => 0],
+            [['initial_qty', 'reorder_level', 'current_qty'], 'integer', 'min' => 0],
         ];
     }
 
@@ -82,9 +83,9 @@ class Inventory extends \yii\db\ActiveRecord
             'sku' => 'SKU',
             'cost_per_unit' => 'Cost Per Unit',
             'price_per_unit' => 'Price Per Unit',
-            'initial_qty' => 'Initial Qty',
+            'initial_qty' => 'Initial Quantity',
             'reorder_level' => 'Reorder Level',
-            'current_qty' => 'Current Qty',
+            'current_qty' => 'Current Quantity',
             'type' => 'Type',
             'rack' => 'Rack',
             'shelf' => 'Shelf',
@@ -149,4 +150,15 @@ class Inventory extends \yii\db\ActiveRecord
     {
         $this->record_status = self::RECORD_STATUS_INACTIVE;
     }
+
+    // public function fields()
+    // {
+    //     $fields = parent::fields();
+
+    //     $fields['product_name_searched'] = function ($model) {
+    //         return $model->product_name == 0 ? 'No Stock' : $model->status;
+    //     };
+
+    //     return $fields;
+    // }
 }

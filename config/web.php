@@ -66,6 +66,7 @@ $config = [
                 
                 // API routes for Inventory 👇 CHANGED THESE TO INCLUDE OPTIONS
                 'GET,OPTIONS api/inventory/list' => 'inventory/list',
+                'GET,OPTIONS api/inventory/listsearch' => 'inventory/listsearch',
                 'POST,OPTIONS api/inventory/checksku' => 'inventory/checksku',
                 'POST,OPTIONS api/inventory/create' => 'inventory/create',
                 'PUT,OPTIONS api/inventory/update' => 'inventory/update',
@@ -77,6 +78,7 @@ $config = [
                 'GET,OPTIONS api/replenishment/view' => 'replenishment/view',
                 'POST,OPTIONS api/replenishment/create' => 'replenishment/create',
                 'PUT,OPTIONS api/replenishment/update' => 'replenishment/update',
+                'PATCH,OPTIONS api/replenishment/update' => 'replenishment/update',
                 'DELETE,OPTIONS api/replenishment/delete' => 'replenishment/delete',
                 'GET,OPTIONS api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
 

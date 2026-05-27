@@ -50,7 +50,7 @@ class Replenishment extends \yii\db\ActiveRecord
             [['supplier', 'hash'], 'string', 'max' => 255],
             [['reference_no'], 'string', 'max' => 100],
             [['added_by', 'updated_by'], 'integer'],
-            ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
+            // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
             [['reference_no'], 'unique', 'targetClass' => '\app\models\Replenishment', 'message' => 'Reference number already exists'],
         ];
     }
