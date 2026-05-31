@@ -79,6 +79,8 @@ $config = [
                 'POST,OPTIONS api/replenishment/create' => 'replenishment/create',
                 'PUT,OPTIONS api/replenishment/update' => 'replenishment/update',
                 'PATCH,OPTIONS api/replenishment/update' => 'replenishment/update',
+                'PUT,OPTIONS api/replenishment/approve' => 'replenishment/approve',
+                'PATCH,OPTIONS api/replenishment/approve' => 'replenishment/approve',
                 'DELETE,OPTIONS api/replenishment/delete' => 'replenishment/delete',
                 'GET,OPTIONS api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
 

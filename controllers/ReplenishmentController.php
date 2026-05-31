@@ -324,20 +324,22 @@ class ReplenishmentController extends Controller
             $oldItems = ReplenishmentItems::findAll(['transaction_id' => $replenishment->id]);
 
             // Validate for negative deductions
-            foreach ($newItems as $newItem) {
-                $inventory = Inventory::findOne(['id' => $newItem['inventory_id']]);
-                foreach ($oldItems as $oldItem) {
-                    if ($newItem['inventory_id'] == $oldItem['inventory_id']) {
-                        if ($newItem['quantity'] < $oldItem['qty_added']) {
-                            $deduction = floatval($oldItem['qty_added'])  - floatval($newItem['quantity']);
-                            if ($inventory->current_qty < $deduction) {
-                                $transaction->rollBack();
-                                Yii::$app->response->statusCode = 422;
-                                return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Cannot deduct. Items were already sold. Please void the sales or adjust inventory.']]];
+            if($data['status'] != 'draft') {
+                foreach ($newItems as $newItem) {
+                    $inventory = Inventory::findOne(['id' => $newItem['inventory_id']]);
+                    foreach ($oldItems as $oldItem) {
+                        if ($newItem['inventory_id'] == $oldItem['inventory_id']) {
+                            if ($newItem['quantity'] < $oldItem['qty_added']) {
+                                $deduction = floatval($oldItem['qty_added'])  - floatval($newItem['quantity']);
+                                if ($inventory->current_qty < $deduction) {
+                                    $transaction->rollBack();
+                                    Yii::$app->response->statusCode = 422;
+                                    return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Cannot deduct. Items were already sold. Please void the sales or adjust inventory.']]];
+                                }
                             }
                         }
-                    }
 
+                    }
                 }
             }
 
@@ -414,6 +416,99 @@ class ReplenishmentController extends Controller
                 'new_data' => json_encode([
                     'replenishment' => $replenishment->attributes,
                     'items' => $newItems 
+                ]),
+                'updated_by' => $replenishment->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Replenishment transaction updated successfully.',
+                'id' => $replenishment->id
+            ];
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionApprove() 
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+        $replenishment = Replenishment::findOne(['reference_no' => $data['reference_no']]);
+        // $reference_no = Yii::$app->request->getBodyParam('reference_no');
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Save parent record
+            $replenishment->status = $data['status'];
+            $replenishment->updated_by = $data['updated_by'];
+
+            if (!$replenishment->save()) {
+                $transaction->rollBack();
+                return ['success' => false, 'errors' => $replenishment->getErrors()];
+            }
+
+            $itemDatas = ReplenishmentItems::findAll(['transaction_id' => $replenishment->id]);
+
+            // Validate for negative deductions
+            // foreach ($itemDatas as $itemData) {
+            //     $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+            //     if ((float)$inventory->current_qty < (float)$itemData['qty_added']) {
+            //         $transaction->rollBack();
+            //         Yii::$app->response->statusCode = 422;
+            //         return ['error' => 'Cannot deduct for '.$inventory->product_name.' ('.$inventory->sku.'). Items were already sold. Please void the sales or adjust inventory.'];
+            //     }
+            // }
+            // **** will not process this since the values are already edited via draft
+
+            foreach ($itemDatas as $itemData) {
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item not found in inventory"];
+                }
+
+                // $replenishmentItem = new ReplenishmentItems();
+                // $replenishmentItem->transaction_id = $replenishment->id;
+                // $replenishmentItem->inventory_id = $inventory->id;
+                // $replenishmentItem->qty_added = (int)$itemData['quantity'];
+                // $replenishmentItem->cost_per_unit = (float)$itemData['cost'];
+
+                // if (!$replenishmentItem->save()) {
+                //     $transaction->rollBack();
+                //     return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
+                // }
+
+                // Update inventory current_qty
+                $inventory->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $itemData['qty_added']]);
+
+                // Update inventory cost_per_unit
+                if ($itemData['cost_per_unit'] > 0) {
+                    $inventory->cost_per_unit = $itemData['cost_per_unit'];
+                }
+
+                if (!$inventory->save(false)) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Failed to update inventory for '{$itemData['item_name']}'"];
+                }
+            }
+
+            // ✅ Insert into audit log after successful update
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'replenishment',
+                'entity_id' => $replenishment->id,
+                'action' => 'approve',
+                'new_data' => json_encode([
+                    'replenishment' => $replenishment->attributes,
+                    'items' => $itemDatas 
                 ]),
                 'updated_by' => $replenishment->updated_by,
                 'updated_at' => date('Y-m-d H:i:s'),
