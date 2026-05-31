@@ -12,7 +12,7 @@ use Yii;
  * @property int $inventory_id
  * @property int $qty_sold
  * @property float $price_per_unit
- * @property float|null $total_item_price
+ * @property float|null $total
  *
  * @property Inventory $inventory
  * @property Sales $sales
@@ -35,10 +35,11 @@ class SalesItems extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['total_item_price'], 'default', 'value' => null],
+            [['sales_id', 'inventory_id', 'qty_sold', 'price_per_unit'], 'required'],
+            [['total'], 'default', 'value' => null],
             [['sales_id', 'inventory_id', 'qty_sold', 'price_per_unit'], 'required'],
             [['sales_id', 'inventory_id', 'qty_sold'], 'integer'],
-            [['price_per_unit', 'total_item_price'], 'number'],
+            [['price_per_unit', 'total'], 'number'],
             [['inventory_id'], 'exist', 'skipOnError' => true, 'targetClass' => Inventory::class, 'targetAttribute' => ['inventory_id' => 'id']],
             [['sales_id'], 'exist', 'skipOnError' => true, 'targetClass' => Sales::class, 'targetAttribute' => ['sales_id' => 'id']],
         ];
@@ -55,7 +56,7 @@ class SalesItems extends \yii\db\ActiveRecord
             'inventory_id' => 'Inventory ID',
             'qty_sold' => 'Qty Sold',
             'price_per_unit' => 'Price Per Unit',
-            'total_item_price' => 'Total Item Price',
+            'total' => 'Total',
         ];
     }
 

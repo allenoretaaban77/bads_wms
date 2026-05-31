@@ -11,7 +11,9 @@ use Yii;
  * @property string|null $customer_name
  * @property string|null $invoice_no
  * @property string $date_sold
+ * @property string|null $payment_status
  * @property string|null $payment_method
+ * @property float $amount
  * @property string $remarks
  * @property string $date_created
  * @property string $date_updated
@@ -45,18 +47,18 @@ class Sales extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['customer_name', 'invoice_no', 'payment_method'], 'required'],
-            [['customer_name', 'invoice_no', 'payment_method', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
-            [['record_status'], 'default', 'value' => 'Active'],
+            [['customer_name', 'invoice_no', 'payment_status', 'date_sold', 'amount'], 'required'],
+            [['customer_name', 'invoice_no', 'payment_method', 'payment_status', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
+            [['record_status'], 'default', 'value' => 'active'],
             [['date_sold', 'date_created', 'date_updated'], 'safe'],
             [['remarks', 'record_status'], 'string'],
             [['added_by', 'updated_by'], 'integer'],
             [['customer_name', 'hash'], 'string', 'max' => 255],
             [['invoice_no'], 'string', 'max' => 100],
-            [['payment_method'], 'string', 'max' => 50],
-            ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
+            [['payment_method', 'payment_status'], 'string', 'max' => 50],
+            // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
             [['invoice_no'], 'unique'],
-            [['invoice_no'], 'unique', 'targetClass' => '\app\models\Sales', 'message' => 'Invoice number already exists'],
+            [['invoice_no'], 'unique', 'targetClass' => '\app\models\Sales', 'message' => 'Sales Transaction number already exists'],
         ];
     }
 
@@ -68,9 +70,11 @@ class Sales extends \yii\db\ActiveRecord
         return [
             'id' => 'ID',
             'customer_name' => 'Customer Name',
-            'invoice_no' => 'Invoice No',
+            'invoice_no' => 'Sales Transaction Number',
             'date_sold' => 'Date Sold',
             'payment_method' => 'Payment Method',
+            'payment_status' => 'Payment Status',
+            'amount' => 'Amount',
             'remarks' => 'Remarks',
             'date_created' => 'Date Created',
             'date_updated' => 'Date Updated',

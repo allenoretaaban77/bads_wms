@@ -75,7 +75,6 @@ class InventoryController extends Controller
         $request = Yii::$app->request;
         $query = Inventory::find();
 
-        // 🔍 Search (product_name or SKU)
         $search = $request->get('search');
         if (!empty($search)) {
             $query->andFilterWhere(['like', 'product_name', $search])
@@ -85,7 +84,7 @@ class InventoryController extends Controller
                 ->orFilterWhere(['like', 'total_inventory_value', $search])
                 ->orFilterWhere(['like', 'total_sold', $search])
                 ->orFilterWhere(['like', 'sku', $search])
-                // ->orFilterWhere(['like', 'type', $search])
+                ->orFilterWhere(['like', 'type', $search])
                 ->orFilterWhere(['like', 'status', $search]);
         }
 
@@ -152,7 +151,6 @@ class InventoryController extends Controller
         $request = Yii::$app->request;
         $query = Inventory::find();
 
-        // 🔍 Search (product_name or SKU)
         $search = $request->get('search');
         if (!empty($search)) {
             $query->andFilterWhere(['like', 'product_name', $search])

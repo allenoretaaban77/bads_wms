@@ -84,7 +84,11 @@ $config = [
 
                 // API routes for Sales
                 'GET,OPTIONS api/sales/list' => 'sales/list',
+                'GET,OPTIONS api/sales/view' => 'sales/view',
                 'POST,OPTIONS api/sales/create' => 'sales/create',
+                'DELETE,OPTIONS api/sales/delete' => 'sales/delete',
+                'DELETE,OPTIONS api/sales/void' => 'sales/void',
+                'GET,OPTIONS api/sales/generatetrnxno' => 'sales/generatetrnxno',
             ],
         ],
         'formatter' => [

@@ -12,6 +12,7 @@ use Yii;
  * @property int $inventory_id
  * @property int $qty_added
  * @property float $cost_per_unit
+ * @property float $total
  * @property string|null $record_status
  *
  * @property Inventory $inventory
@@ -40,12 +41,12 @@ class ReplenishmentItems extends \yii\db\ActiveRecord
     {
         return [
             [['transaction_id', 'inventory_id', 'qty_added', 'cost_per_unit'], 'required'],
-            [['record_status'], 'default', 'value' => 'Active'],
+            [['record_status'], 'default', 'value' => 'active'],
             [['transaction_id', 'inventory_id', 'qty_added'], 'integer'],
             [['cost_per_unit'], 'number'],
             [['inventory_id'], 'exist', 'skipOnError' => true, 'targetClass' => Inventory::class, 'targetAttribute' => ['inventory_id' => 'id']],
             [['record_status'], 'string'],
-            ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
+            // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
         ];
     }
 
@@ -60,6 +61,7 @@ class ReplenishmentItems extends \yii\db\ActiveRecord
             'inventory_id' => 'Inventory ID',
             'qty_added' => 'Qty Added',
             'cost_per_unit' => 'Cost Per Unit',
+            'total' => 'Total',
             'record_status' => 'Record Status',
         ];
     }

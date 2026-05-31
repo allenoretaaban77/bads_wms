@@ -11,6 +11,7 @@ use Yii;
  * @property string|null $supplier
  * @property string|null $reference_no
  * @property string $date_received
+ * @property float $amount
  * @property string $remarks
  * @property string $date_created
  * @property string $date_updated
@@ -18,6 +19,7 @@ use Yii;
  * @property int|null $updated_by
  * @property string|null $hash
  * @property string|null $record_status
+ * @property string|null $status
  */
 class Replenishment extends \yii\db\ActiveRecord
 {
@@ -42,11 +44,11 @@ class Replenishment extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['supplier', 'reference_no', 'date_received'], 'required'],
+            [['supplier', 'reference_no', 'date_received', 'amount'], 'required'],
             [['supplier', 'reference_no', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
-            [['record_status'], 'default', 'value' => 'Active'],
+            [['record_status'], 'default', 'value' => 'active'],
             [['date_received', 'date_created', 'date_updated'], 'safe'],
-            [['record_status', 'remarks'], 'string'],
+            [['record_status', 'remarks', 'status'], 'string'],
             [['supplier', 'hash'], 'string', 'max' => 255],
             [['reference_no'], 'string', 'max' => 100],
             [['added_by', 'updated_by'], 'integer'],
@@ -65,6 +67,7 @@ class Replenishment extends \yii\db\ActiveRecord
             'supplier' => 'Supplier Name',
             'reference_no' => 'Reference Number',
             'date_received' => 'Date Received',
+            'amount' => 'Amount',
             'remarks' => 'Remarks',
             'date_created' => 'Date Created',
             'date_updated' => 'Date Updated',
@@ -72,6 +75,7 @@ class Replenishment extends \yii\db\ActiveRecord
             'updated_by' => 'Updated By',
             'hash' => 'Hash',
             'record_status' => 'Record Status',
+            'status' => 'Status',
         ];
     }
 
