@@ -21,6 +21,7 @@ use Yii;
  * @property int|null $updated_by
  * @property string|null $hash
  * @property string|null $record_status
+ * @property string|null $is_paid
  *
  * @property SalesItems[] $salesItems
  */
@@ -51,7 +52,7 @@ class Sales extends \yii\db\ActiveRecord
             [['customer_name', 'invoice_no', 'payment_method', 'payment_status', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'active'],
             [['date_sold', 'date_created', 'date_updated'], 'safe'],
-            [['remarks', 'record_status'], 'string'],
+            [['remarks', 'record_status', 'is_paid'], 'string'],
             [['added_by', 'updated_by'], 'integer'],
             [['customer_name', 'hash'], 'string', 'max' => 255],
             [['invoice_no'], 'string', 'max' => 100],
@@ -82,6 +83,7 @@ class Sales extends \yii\db\ActiveRecord
             'updated_by' => 'Updated By',
             'hash' => 'Hash',
             'record_status' => 'Record Status',
+            'is_paid' => 'Paid',
         ];
     }
 

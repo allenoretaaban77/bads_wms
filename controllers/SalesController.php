@@ -147,6 +147,9 @@ class SalesController extends Controller
             ->select([
                 'sales_items.*',
                 'product_name' => 'inventory.product_name',
+                'current_qty' => 'inventory.current_qty',
+                'reorder_level' => 'inventory.reorder_level',
+                'cost_per_unit' => 'inventory.cost_per_unit',
                 'sku' => 'inventory.sku',
             ])
             ->leftJoin('inventory', 'inventory.id = sales_items.inventory_id')
@@ -177,15 +180,14 @@ class SalesController extends Controller
             return ['error' => 'Validation failed', 'errors' => $data->errors];
         }
 
-        $request = Yii::$app->request;
-        $data = $request->post();
+        $data = Yii::$app->request->post();
         if (!isset($data['items']) || !is_array($data['items']) || count($data['items']) === 0) {
             Yii::$app->response->statusCode = 422;
             return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
         }
 
-        $request = Yii::$app->request;
-        $data = $request->post();
+        // $request = Yii::$app->request;
+        // $data = $request->post();
         $transaction = Yii::$app->db->beginTransaction();
         try {
             $sales = new Sales();
@@ -197,6 +199,7 @@ class SalesController extends Controller
             $sales->remarks = $data['remarks'] ?? null;
             $sales->date_created = date('Y-m-d H:i:s');
             $sales->added_by = $data['added_by'] ?? null;
+            $sales->status = $data['status'] ?? null;
 
             if (!$sales->save()) {
                 $transaction->rollBack();
@@ -207,7 +210,11 @@ class SalesController extends Controller
 
             $itemsData = $data['items'];
             foreach ($itemsData as $itemData) {
-                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                // $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                $inventory = Inventory::find()
+                    ->where(['id' => $itemData['inventory_id']])
+                    ->forUpdate()
+                    ->one();
                     
                 if (!$inventory) {
                     $transaction->rollBack();
@@ -220,13 +227,13 @@ class SalesController extends Controller
                     return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Invalid quantity.']]];
                 }
 
-                if($data['payment_status'] != 'draft') {
-                    if ($itemData['price'] == "" || $itemData['price'] < 1) {
-                        $transaction->rollBack();
-                        Yii::$app->response->statusCode = 422;
-                        return ['error' => 'Validation failed', 'errors' => ['price_'.$inventory->id => ['Invalid price.']]];
-                    }
+                if ($itemData['price'] == "" || $itemData['price'] < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['price_'.$inventory->id => ['Invalid price.']]];
+                }
 
+                if($data['status'] != 'draft') {
                     if ($inventory->current_qty < $itemData['quantity']) {
                         $transaction->rollBack();
                         Yii::$app->response->statusCode = 422;
@@ -246,12 +253,12 @@ class SalesController extends Controller
                 }
 
                 // Update Inventory current_qty and price_per_unit
-                if($data['payment_status'] != 'draft') {
+                if($data['status'] != 'draft') {
                     $inventory->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $salesItem->qty_sold]);
-                }
                 
-                if ($salesItem->price_per_unit > 0) {
-                    $inventory->price_per_unit = $salesItem->price_per_unit;
+                    if ($salesItem->price_per_unit > 0) {
+                        $inventory->price_per_unit = $salesItem->price_per_unit;
+                    }
                 }
 
                 if (!$inventory->save(false)) { // Save without validation to be faster
@@ -277,6 +284,258 @@ class SalesController extends Controller
             return [
                 'success' => true,
                 'message' => 'Sales invoice created successfully',
+                'id' => $sales->id
+            ];
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionUpdate()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $invoice_no = Yii::$app->request->getBodyParam('invoice_no');
+        $sales = Sales::findOne(['invoice_no' => $invoice_no]);
+        $oldData = $sales->attributes;
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+        $sales->load($data, '');
+
+        if (!$sales->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $sales->errors];
+        }
+
+        if (!isset($data['items']) || !is_array($data['items']) || count($data['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Save parent record
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                return ['success' => false, 'errors' => $sales->getErrors()];
+            }
+
+            $newItems = $data['items'];
+            $oldItems = SalesItems::findAll(['sales_id' => $sales->id]);
+
+            // Validate for negative deductions
+            // if($data['status'] != 'draft') {
+            //     foreach ($newItems as $newItem) {
+            //         $inventory = Inventory::findOne(['id' => $newItem['inventory_id']]);
+            //         foreach ($oldItems as $oldItem) {
+            //             if ($newItem['inventory_id'] == $oldItem['inventory_id']) {
+
+            //                 var_dump([ 'new'=>$newItem['quantity'], 'old'=> $oldItem['qty_sold']]);
+            //                 if ($newItem['quantity'] > $oldItem['qty_sold']) {
+            //                     $induction = floatval($newItem['quantity']) - floatval($oldItem['qty_sold']);
+            //                     if ($inventory->current_qty < $induction) {
+            //                         $transaction->rollBack();
+            //                         Yii::$app->response->statusCode = 422;
+            //                         return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Cannot add additional count. Insufficient stock.']]];
+            //                     }
+            //                 }
+            //             }
+
+            //         }
+            //     }
+            // }
+
+            // Delete old items before re‑inserting
+            $oldItemsToDelete = [];
+            if($data['status'] != 'draft') {
+                foreach ($oldItems as $oldItem) {
+                    $oldItemsToDelete[] = $oldItem->attributes;
+
+                    $inventory = Inventory::findOne($oldItem->inventory_id);
+                    if ($inventory) {
+                        $inventory->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $oldItem->qty_sold]);
+                        $inventory->save(false);
+                    }
+                }
+            }
+            SalesItems::deleteAll(['sales_id' => $sales->id]);
+
+            foreach ($newItems as $itemData) {
+                // $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                $inventory = Inventory::find()
+                    ->where(['id' => $itemData['inventory_id']])
+                    ->forUpdate()
+                    ->one();
+                
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item not found in inventory"];
+                }
+
+                if (empty($itemData['quantity']) || $itemData['quantity'] < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Invalid quantity.']]];
+                }
+
+                if (empty($itemData['cost']) || $itemData['cost'] < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['cost_'.$inventory->id => ['Invalid cost.']]];
+                }
+
+                $salesItem = new SalesItems();
+                $salesItem->sales_id = $sales->id;
+                $salesItem->inventory_id = $inventory->id;
+                $salesItem->qty_sold = (int)$itemData['quantity'];
+                $salesItem->price_per_unit = (float)$itemData['price'];
+
+                if (!$salesItem->save()) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'errors' => $salesItem->getErrors()];
+                }
+
+                if($data['status'] != 'draft') {
+                    // Update inventory current_qty
+                    $inventory->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $salesItem->qty_sold]);
+
+                    // Update inventory price_per_unit
+                    if ($salesItem->price_per_unit > 0) {
+                        $inventory->price_per_unit = $salesItem->price_per_unit;
+                    }
+                }
+
+                if (!$inventory->save(false)) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Failed to update inventory for '{$itemData['item_name']}'"];
+                }
+            }
+
+            // ✅ Insert into audit log after successful update
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'update',
+                'old_data' => json_encode([
+                    'sales' => $oldData,
+                    'items' => $oldItemsToDelete 
+                ]),
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $newItems 
+                ]),
+                'updated_by' => $sales->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales transaction updated successfully.',
+                'id' => $sales->id
+            ];
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionApprove() 
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+        $sales = Sales::findOne(['invoice_no' => $data['invoice_no']]);
+        // $invoice_no = Yii::$app->request->getBodyParam('invoice_no');
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Save parent record
+            $sales->status = $data['status'];
+            $sales->updated_by = $data['updated_by'];
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                return ['success' => false, 'errors' => $sales->getErrors()];
+            }
+
+            $itemDatas = SalesItems::findAll(['sales_id' => $sales->id]);
+
+            // Validate for negative deductions
+            // foreach ($itemDatas as $itemData) {
+            //     $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+            //     if ((float)$inventory->current_qty < (float)$itemData['qty_added']) {
+            //         $transaction->rollBack();
+            //         Yii::$app->response->statusCode = 422;
+            //         return ['error' => 'Cannot deduct for '.$inventory->product_name.' ('.$inventory->sku.'). Items were already sold. Please void the sales or adjust inventory.'];
+            //     }
+            // }
+            // **** will not process this since the values are already edited via draft
+
+            foreach ($itemDatas as $itemData) {
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item not found in inventory"];
+                }
+
+                // $salesItem = new SalesItems();
+                // $salesItem->transaction_id = $sales->id;
+                // $salesItem->inventory_id = $inventory->id;
+                // $salesItem->qty_added = (int)$itemData['quantity'];
+                // $salesItem->price_per_unit = (float)$itemData['cost'];
+
+                // if (!$salesItem->save()) {
+                //     $transaction->rollBack();
+                //     return ['success' => false, 'errors' => $salesItem->getErrors()];
+                // }
+
+                if ($inventory->current_qty < $itemData['qty_sold']) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Insufficient stock for item '.$inventory->product_name.' ('.$inventory->sku.').'];
+                }
+
+                // Update inventory current_qty
+                $inventory->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $itemData['qty_sold']]);
+
+                // Update inventory price_per_unit
+                if ($itemData['price_per_unit'] > 0) {
+                    $inventory->price_per_unit = $itemData['price_per_unit'];
+                }
+
+                if (!$inventory->save(false)) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Failed to update inventory for '{$itemData['item_name']}'"];
+                }
+            }
+
+            // ✅ Insert into audit log after successful update
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'approve',
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $itemDatas 
+                ]),
+                'updated_by' => $sales->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales transaction approved successfully.',
                 'id' => $sales->id
             ];
         } catch (\Exception $e) {
@@ -384,27 +643,31 @@ class SalesController extends Controller
             $oldData = $sales->attributes;
             $itemsData = [];
 
-            // Rollback inventory stock levels and collect item data
-            $salesItems = SalesItems::findAll(['sales_id' => $id]);
-            foreach ($salesItems as $salesItem) {
-                $itemsData[] = $salesItem->attributes;
+            if ($sales->status != "draft") {
+                // Rollback inventory stock levels and collect item data
+                $salesItems = SalesItems::findAll(['sales_id' => $id]);
+                foreach ($salesItems as $salesItem) {
+                    $itemsData[] = $salesItem->attributes;
 
-                $inventory = Inventory::findOne($salesItem->inventory_id);
-                if ($inventory) {
-                    if ($sales['payment_status'] != 'draft') 
-                        $inventory->current_qty += $salesItem->qty_sold;
+                    $inventory = Inventory::findOne($salesItem->inventory_id);
+                    if ($inventory) {
+                        if ($sales['payment_status'] != 'draft') 
+                            $inventory->current_qty += $salesItem->qty_sold;
 
-                    if (!$inventory->save(false)) {
+                        if (!$inventory->save(false)) {
+                            $transaction->rollBack();
+                            return ['success' => false, 'error' => "Failed to update inventory stock."];
+                        }
+                    }
+
+                    // Hard delete sales item
+                    if (!$salesItem->delete()) {
                         $transaction->rollBack();
-                        return ['success' => false, 'error' => "Failed to update inventory stock."];
+                        return ['success' => false, 'error' => "Failed to delete sales item."];
                     }
                 }
-
-                // Hard delete sales item
-                if (!$salesItem->delete()) {
-                    $transaction->rollBack();
-                    return ['success' => false, 'error' => "Failed to delete sales item."];
-                }
+            } else {
+                SalesItems::deleteAll(['sales_id' => $id]);
             }
 
             // Hard delete parent sales record
