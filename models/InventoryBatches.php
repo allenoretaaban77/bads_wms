@@ -5,20 +5,19 @@ namespace app\models;
 use Yii;
 
 /**
- * This is the model class for table "sales_items".
+ * This is the model class for table "inventory_batches".
  *
  * @property int $id
- * @property int $sales_id
  * @property int $inventory_id
- * @property int $qty_sold
- * @property float $price_per_unit
  * @property float $cost_per_unit
- * @property float|null $total
+ * @property int $initial_qty
+ * @property int $current_qty
+ * @property string $date_received
  *
  * @property Inventory $inventory
- * @property Sales $sales
+ * @property SalesItems[] $salesItems
  */
-class SalesItems extends \yii\db\ActiveRecord
+class InventoryBatches extends \yii\db\ActiveRecord
 {
 
 
@@ -27,7 +26,7 @@ class SalesItems extends \yii\db\ActiveRecord
      */
     public static function tableName()
     {
-        return 'sales_items';
+        return 'inventory_batches';
     }
 
     /**
@@ -36,12 +35,11 @@ class SalesItems extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['sales_id', 'inventory_id', 'qty_sold', 'price_per_unit', 'cost_per_unit'], 'required'],
-            [['total'], 'default', 'value' => null],
-            [['sales_id', 'inventory_id', 'qty_sold'], 'integer'],
-            [['price_per_unit', 'total', 'cost_per_unit'], 'number'],
+            [['inventory_id', 'cost_per_unit', 'initial_qty', 'current_qty'], 'required'],
+            [['inventory_id', 'initial_qty', 'current_qty'], 'integer'],
+            [['cost_per_unit'], 'number'],
+            [['date_received'], 'safe'],
             [['inventory_id'], 'exist', 'skipOnError' => true, 'targetClass' => Inventory::class, 'targetAttribute' => ['inventory_id' => 'id']],
-            [['sales_id'], 'exist', 'skipOnError' => true, 'targetClass' => Sales::class, 'targetAttribute' => ['sales_id' => 'id']],
         ];
     }
 
@@ -52,12 +50,11 @@ class SalesItems extends \yii\db\ActiveRecord
     {
         return [
             'id' => 'ID',
-            'sales_id' => 'Sales ID',
             'inventory_id' => 'Inventory ID',
-            'qty_sold' => 'Qty Sold',
-            'price_per_unit' => 'Price Per Unit',
             'cost_per_unit' => 'Cost Per Unit',
-            'total' => 'Total',
+            'initial_qty' => 'Initial Qty',
+            'current_qty' => 'Current Qty',
+            'date_received' => 'Date Received',
         ];
     }
 
@@ -72,13 +69,13 @@ class SalesItems extends \yii\db\ActiveRecord
     }
 
     /**
-     * Gets query for [[Sales]].
+     * Gets query for [[SalesItems]].
      *
      * @return \yii\db\ActiveQuery
      */
-    public function getSales()
+    public function getSalesItems()
     {
-        return $this->hasOne(Sales::class, ['id' => 'sales_id']);
+        return $this->hasMany(SalesItems::class, ['batch_id' => 'id']);
     }
 
 }

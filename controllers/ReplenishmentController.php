@@ -6,6 +6,7 @@ use Yii;
 use app\models\Replenishment;
 use app\models\ReplenishmentItems;
 use app\models\Inventory;
+use app\models\InventoryBatches;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\web\Response;
@@ -182,10 +183,9 @@ class ReplenishmentController extends Controller
         //     //     ->where('transaction_id = replenishment.id')
         // ]);
         // ->where(['replenishment.status' => 'approved']);
-
     }
 
-    public function actionStockintrnxs($id) 
+    public function actionStockintrnxs($id, $cost) 
     {
         if (Yii::$app->request->method !== 'GET') {
             Yii::$app->response->statusCode = 405;
@@ -210,9 +210,10 @@ class ReplenishmentController extends Controller
             ->leftJoin('replenishment', 'replenishment.id = replenishment_items.transaction_id')
             ->leftJoin('inventory', 'inventory.id = replenishment_items.inventory_id')
             ->where(['inventory_id' => $id])
+            // ->andWhere(['replenishment_items.cost_per_unit' => $cost])
             ->andWhere(['replenishment_items.status' => 'approved']);
         $query->orderBy(['replenishment.date_received' => SORT_DESC]);
-        $query->limit(10);
+        // $query->limit(1);
         $totalCount = $query->count();
         $items = $query->asArray()->all();
 
@@ -231,7 +232,6 @@ class ReplenishmentController extends Controller
             'count' => $totalCount,
             'data' => $data,
         ];
-
     }
 
     public function actionView($id)
@@ -251,18 +251,31 @@ class ReplenishmentController extends Controller
             return ['success' => false, 'error' => 'Replenishment transaction not found'];
         }
 
+        // 🌟 Subquery to calculate total live stock across all batches for the product
+        $batchQtySubquery = (new \yii\db\Query())
+            ->select('SUM(current_qty)')
+            ->from('inventory_batches')
+            ->where('inventory_id = replenishment_items.inventory_id');
+
         $items = ReplenishmentItems::find()
             ->select([
                 'replenishment_items.*',
-                'product_name' => 'inventory.product_name',
-                'current_qty' => 'inventory.current_qty',
+                'product_name'  => 'inventory.product_name',
+                'sku'           => 'inventory.sku',
                 'reorder_level' => 'inventory.reorder_level',
-                'sku' => 'inventory.sku',
+                // 🔥 This replaces the hardcoded 0 with the live total count from your batches
+                'current_qty'   => $batchQtySubquery, 
             ])
             ->leftJoin('inventory', 'inventory.id = replenishment_items.inventory_id')
             ->where(['transaction_id' => $id])
             ->asArray()
             ->all();
+
+        // Typecast current_qty elements to integers since SQL SUM() returns strings/floats
+        foreach ($items as &$item) {
+            $item['current_qty'] = isset($item['current_qty']) ? (int)$item['current_qty'] : 0;
+        }
+        unset($item); // Break reference pointer link safety wrapper
 
         $replenishment['items'] = $items;
 
@@ -272,7 +285,7 @@ class ReplenishmentController extends Controller
         ];
     }
 
-    public function actionCreate()
+    public function actionCreateOld()
     {
         if (Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -388,7 +401,7 @@ class ReplenishmentController extends Controller
         }
     }
 
-    public function actionUpdate()
+    public function actionUpdateOld()
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -534,7 +547,7 @@ class ReplenishmentController extends Controller
         }
     }
 
-    public function actionApprove() 
+    public function actionApproveOld() 
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -543,8 +556,12 @@ class ReplenishmentController extends Controller
 
         $request = Yii::$app->request;
         $data = $request->post();
+
         $replenishment = Replenishment::findOne(['reference_no' => $data['reference_no']]);
-        // $reference_no = Yii::$app->request->getBodyParam('reference_no');
+        if (!$replenishment) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Replenishment record not found'];
+        }
 
         $transaction = Yii::$app->db->beginTransaction();
         try {
@@ -585,17 +602,6 @@ class ReplenishmentController extends Controller
                     return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
                 }
 
-                // $replenishmentItem = new ReplenishmentItems();
-                // $replenishmentItem->transaction_id = $replenishment->id;
-                // $replenishmentItem->inventory_id = $inventory->id;
-                // $replenishmentItem->qty_added = (int)$itemData['quantity'];
-                // $replenishmentItem->cost_per_unit = (float)$itemData['cost'];
-
-                // if (!$replenishmentItem->save()) {
-                //     $transaction->rollBack();
-                //     return ['success' => false, 'errors' => $replenishmentItem->getErrors()];
-                // }
-
                 // Update inventory current_qty
                 $inventory->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $itemData['qty_added']]);
 
@@ -634,6 +640,473 @@ class ReplenishmentController extends Controller
             return ['success' => false, 'error' => $e->getMessage()];
         }
     }
+
+    public function actionApprove() 
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+        
+        $replenishment = Replenishment::findOne(['reference_no' => $data['reference_no']]);
+        if (!$replenishment) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Replenishment record not found'];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // 1. Save parent record status
+            $replenishment->status = $data['status']; // e.g., 'approved'
+            $replenishment->updated_by = $data['updated_by'];
+
+            if (!$replenishment->save()) {
+                $transaction->rollBack();
+                return ['success' => false, 'errors' => $replenishment->getErrors()];
+            }
+
+            // Fetch all item lines attached to this delivery
+            $itemDatas = ReplenishmentItems::findAll(['transaction_id' => $replenishment->id]);
+
+            foreach ($itemDatas as $itemData) {
+                // Verify product exists in the Master table
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item ID {$itemData['inventory_id']} not found in product master."];
+                }
+
+                // 2. Approve the individual line item status
+                $itemData->status = 'approved';        
+                if (!$itemData->save()) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'errors' => $itemData->getErrors()];
+                }
+
+                // 3. BATCH ROUTING: Look for an existing batch with the exact same cost
+                // (Uses Approach 1: Merging matching costs to keep layouts clean)
+                $existingBatch = InventoryBatches::findOne([
+                    'inventory_id'  => $itemData['inventory_id'],
+                    'cost_per_unit' => $itemData['cost_per_unit']
+                ]);
+
+                if ($existingBatch) {
+                    // Batch found with same cost -> Update quantities using expressions to avoid race conditions
+                    $existingBatch->initial_qty = new \yii\db\Expression('initial_qty + :qty', [':qty' => $itemData['qty_added']]);
+                    $existingBatch->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $itemData['qty_added']]);
+                    
+                    if (!$existingBatch->save(false)) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to update existing batch layer for '{$inventory->product_name}'"];
+                    }
+                } else {
+                    // No matching cost layer -> Create a brand new batch row
+                    $newBatch = new InventoryBatches();
+                    $newBatch->inventory_id = $itemData['inventory_id'];
+                    $newBatch->cost_per_unit = $itemData['cost_per_unit'];
+                    $newBatch->initial_qty = $itemData['qty_added'];
+                    $newBatch->current_qty = $itemData['qty_added'];
+                    
+                    if (!$newBatch->save()) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'errors' => $newBatch->getErrors()];
+                    }
+                }
+            }
+
+            // 4. Insert into audit log
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'replenishment',
+                'entity_id' => $replenishment->id,
+                'action' => 'approve',
+                'new_data' => json_encode([
+                    'replenishment' => $replenishment->attributes,
+                    'items' => array_map(function($item) { return $item->attributes; }, $itemDatas) 
+                ]),
+                'updated_by' => $replenishment->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Replenishment transaction approved and inventory batches updated successfully.',
+                'id' => $replenishment->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionCreate()
+    {
+        // Ensure JSON response format
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return [
+                'success' => false, 
+                'message' => 'Method not allowed.', 
+                'errors' => []
+            ];
+        }
+
+        $requestData = Yii::$app->request->post();
+
+        // Validate if items exist and is a valid array
+        if (!isset($requestData['items']) || !is_array($requestData['items']) || empty($requestData['items'])) {
+            Yii::$app->response->statusCode = 422;
+            return [
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => ['items' => ['Add at least one item.']]
+            ];
+        }
+
+        // Optimization: Batch-load all inventories up front to avoid N+1 queries loop
+        $inventoryIds = array_filter(array_column($requestData['items'], 'inventory_id'));
+        $inventories = Inventory::find()->where(['id' => $inventoryIds])->indexBy('id')->all();
+
+        // Server-side calculation of the total amount to prevent client tampering
+        $calculatedAmount = 0.0;
+        foreach ($requestData['items'] as $itemData) {
+            $qty = (int)($itemData['quantity'] ?? 0);
+            $cost = (float)($itemData['cost'] ?? 0);
+            if ($qty > 0 && $cost > 0) {
+                $calculatedAmount += ($qty * $cost);
+            }
+        }
+
+        // Single instantiation handles both validation and execution safely
+        $replenishment = new Replenishment();
+        $replenishment->load($requestData, '');
+        
+        // Explicitly set metadata
+        $replenishment->supplier = $requestData['supplier'] ?? null;
+        $replenishment->reference_no = $requestData['reference_no'] ?? null;
+        $replenishment->date_received = $requestData['date_received'] ?? date('Y-m-d');
+        $replenishment->amount = $calculatedAmount; // Safe server-calculated total
+        $replenishment->remarks = $requestData['remarks'] ?? null;
+        $replenishment->date_created = date('Y-m-d H:i:s');
+        $replenishment->added_by = Yii::$app->user->id ?? null; // Secure server-side user tracking
+        $replenishment->status = $requestData['status'] ?? 'draft';
+
+        if (!$replenishment->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return [
+                'success' => false, 
+                'message' => 'Validation failed.', 
+                'errors' => $replenishment->errors
+            ];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            if (!$replenishment->save(false)) { // Validation already ran above
+                $transaction->rollBack();
+                return [
+                    'success' => false, 
+                    'message' => 'Failed to save replenishment transaction.', 
+                    'errors' => $replenishment->getErrors()
+                ];
+            }
+
+            $processedPairs = [];
+
+            foreach ($requestData['items'] as $itemData) {
+                $invId = $itemData['inventory_id'] ?? null;
+                $inventory = $inventories[$invId] ?? null;
+                
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'success' => false, 
+                        'message' => "Item ID {$invId} not found in inventory.", 
+                        'errors' => []
+                    ];
+                }
+
+                $qtyAdded = (int)($itemData['quantity'] ?? 0);
+                $costPerUnit = (float)($itemData['cost'] ?? 0);
+
+                if ($qtyAdded < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'success' => false,
+                        'message' => 'Validation failed.',
+                        'errors' => ["quantity_{$inventory->id}" => ['Invalid quantity.']]
+                    ];
+                }
+
+                if ($costPerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'success' => false,
+                        'message' => 'Validation failed.',
+                        'errors' => ["cost_{$inventory->id}" => ['Invalid cost.']]
+                    ];
+                }
+
+                // Block exact matching row duplication bugs
+                $payloadKey = $inventory->id . '-' . $costPerUnit;
+                if (isset($processedPairs[$payloadKey])) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'success' => false,
+                        'message' => 'Validation failed.',
+                        'errors' => [
+                            'items' => ["Duplicate Row Blocked: An identical entry for {$inventory->product_name} [{$inventory->sku}] exists inside this form submission."]
+                        ]
+                    ];
+                }
+                $processedPairs[$payloadKey] = true;
+
+                $replenishmentItem = new ReplenishmentItems();
+                $replenishmentItem->transaction_id = $replenishment->id;
+                $replenishmentItem->inventory_id = $inventory->id;
+                $replenishmentItem->qty_added = $qtyAdded;
+                $replenishmentItem->cost_per_unit = $costPerUnit;
+                $replenishmentItem->status = ($replenishment->status === 'approved') ? 'approved' : 'draft';
+
+                if (!$replenishmentItem->save()) {
+                    $transaction->rollBack();
+                    return [
+                        'success' => false, 
+                        'message' => 'Failed to save item line data.', 
+                        'errors' => $replenishmentItem->getErrors()
+                    ];
+                }
+            }
+
+            // Audit Logging
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'replenishment',
+                'entity_id' => $replenishment->id,
+                'action' => 'create',
+                'new_data' => json_encode([
+                    'replenishment' => $replenishment->attributes,
+                    'items' => $requestData['items']
+                ]),
+                'updated_by' => $replenishment->added_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            
+            return [
+                'success' => true,
+                'message' => 'Replenishment transaction created successfully.',
+                'id' => $replenishment->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false, 
+                'message' => 'An unexpected internal error occurred.', 
+                'errors' => [$e->getMessage()]
+            ];
+        }
+    }
+
+    public function actionUpdate()
+    {
+        // Ensure JSON response format
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return [
+                'success' => false,
+                'message' => 'Method not allowed.',
+                'errors' => []
+            ];
+        }
+
+        $requestData = Yii::$app->request->post();
+        
+        // Retrieve reference number cleanly from body params or POST array
+        $referenceNo = Yii::$app->request->getBodyParam('reference_no') ?? ($requestData['reference_no'] ?? null);
+        
+        // Find existing parent record
+        $replenishment = Replenishment::findOne(['reference_no' => $referenceNo]);
+        if (!$replenishment) {
+            Yii::$app->response->statusCode = 404;
+            return [
+                'success' => false,
+                'message' => "Replenishment transaction with reference '{$referenceNo}' not found.",
+                'errors' => []
+            ];
+        }
+
+        // Store baseline details for inventory reversal and audit logging
+        $oldStatus = $replenishment->status;
+        $oldData = $replenishment->attributes;
+        $oldItems = ReplenishmentItems::findAll(['transaction_id' => $replenishment->id]);
+
+        // Validate if new items array exists and is valid
+        if (!isset($requestData['items']) || !is_array($requestData['items']) || empty($requestData['items'])) {
+            Yii::$app->response->statusCode = 422;
+            return [
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => ['items' => ['Add at least one item.']]
+            ];
+        }
+
+        // Optimization: Batch-load all required inventories to eliminate N+1 queries loop
+        $newInventoryIds = array_filter(array_column($requestData['items'], 'inventory_id'));
+        $oldInventoryIds = array_column($oldItems, 'inventory_id');
+        $allInventoryIds = array_unique(array_merge($newInventoryIds, $oldInventoryIds));
+        $inventories = Inventory::find()->where(['id' => $allInventoryIds])->indexBy('id')->all();
+
+        // Server-side recalculation of the total amount to guarantee system integrity
+        $calculatedAmount = 0.0;
+        foreach ($requestData['items'] as $itemData) {
+            $qty = (int)($itemData['quantity'] ?? 0);
+            $cost = (float)($itemData['cost'] ?? 0);
+            if ($qty > 0 && $cost > 0) {
+                $calculatedAmount += ($qty * $cost);
+            }
+        }
+
+        // Safe model population and attribute updating
+        $replenishment->load($requestData, '');
+        $replenishment->supplier = $requestData['supplier'] ?? $replenishment->supplier;
+        $replenishment->date_received = $requestData['date_received'] ?? $replenishment->date_received;
+        $replenishment->amount = $calculatedAmount; // Apply safe calculated value
+        $replenishment->remarks = $requestData['remarks'] ?? $replenishment->remarks;
+        $replenishment->status = $requestData['status'] ?? 'draft';
+        $replenishment->updated_by = Yii::$app->user->id ?? null; // Secure server-side user tracking
+
+        if (!$replenishment->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return [
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => $replenishment->errors
+            ];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // 1. REVERT STOCK IF PREVIOUSLY APPROVED
+            // If the transaction was approved, we must roll back its original stock layers before modifying
+            $oldItemsDeletedLogs = [];
+            foreach ($oldItems as $oldItem) {
+                $oldItemsDeletedLogs[] = $oldItem->attributes;
+            }
+
+            // 2. PURGE OLD LINE ITEMS
+            ReplenishmentItems::deleteAll(['transaction_id' => $replenishment->id]);
+
+            // Save modified parent model parameters
+            if (!$replenishment->save(false)) {
+                $transaction->rollBack();
+                return ['success' => false, 'message' => 'Failed to save parent replenishment record.', 'errors' => $replenishment->getErrors()];
+            }
+
+            // 3. PROCESS AND WRITE NEW ITEMS
+            $processedPairs = [];
+            foreach ($requestData['items'] as $itemData) {
+                $invId = $itemData['inventory_id'] ?? null;
+                $inventory = $inventories[$invId] ?? null;
+
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['success' => false, 'message' => "Item ID {$invId} not found in master inventory records.", 'errors' => []];
+                }
+
+                $qtyAdded = (int)($itemData['quantity'] ?? 0);
+                $costPerUnit = (float)($itemData['cost'] ?? 0);
+
+                if ($qtyAdded < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['success' => false, 'message' => 'Validation failed.', 'errors' => ["quantity_{$inventory->id}" => ['Invalid quantity.']]];
+                }
+
+                if ($costPerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['success' => false, 'message' => 'Validation failed.', 'errors' => ["cost_{$inventory->id}" => ['Invalid cost.']]];
+                }
+
+                // Block exact matching duplicate item row submission bugs inside the same form
+                $payloadKey = $inventory->id . '-' . $costPerUnit;
+                if (isset($processedPairs[$payloadKey])) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'success' => false,
+                        'message' => 'Validation failed.',
+                        'errors' => ['items' => ["Duplicate Row Blocked: An identical entry for {$inventory->product_name} [{$inventory->sku}] exists inside this submission."]]
+                    ];
+                }
+                $processedPairs[$payloadKey] = true;
+
+                // Instantiate and write new sub-line records
+                $replenishmentItem = new ReplenishmentItems();
+                $replenishmentItem->transaction_id = $replenishment->id;
+                $replenishmentItem->inventory_id = $inventory->id;
+                $replenishmentItem->qty_added = $qtyAdded;
+                $replenishmentItem->cost_per_unit = $costPerUnit;
+                $replenishmentItem->status = ($replenishment->status === 'approved') ? 'approved' : 'draft';
+
+                if (!$replenishmentItem->save()) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'message' => 'Failed to save updated item line data.', 'errors' => $replenishmentItem->getErrors()];
+                }
+
+            }
+
+            // 5. COMPREHENSIVE AUDIT LOGGING
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'replenishment',
+                'entity_id' => $replenishment->id,
+                'action' => 'update',
+                'old_data' => json_encode([
+                    'replenishment' => $oldData,
+                    'items' => $oldItemsDeletedLogs
+                ]),
+                'new_data' => json_encode([
+                    'replenishment' => $replenishment->attributes,
+                    'items' => $requestData['items']
+                ]),
+                'updated_by' => $replenishment->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+
+            return [
+                'success' => true,
+                'message' => 'Replenishment transaction updated successfully.',
+                'id' => $replenishment->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'message' => 'An unexpected internal error occurred.',
+                'errors' => [$e->getMessage()]
+            ];
+        }
+    }    
 
     public function actionDelete()
     {

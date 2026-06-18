@@ -6,6 +6,8 @@ use Yii;
 use app\models\Sales;
 use app\models\SalesItems;
 use app\models\Inventory;
+use app\models\InventoryBatches;
+use app\models\ReplenishmentItems;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\web\Response;
@@ -147,7 +149,7 @@ class SalesController extends Controller
             ->select([
                 'sales_items.*',
                 'product_name' => 'inventory.product_name',
-                'current_qty' => 'inventory.current_qty',
+                // 'current_qty' => 'inventory.current_qty',
                 'reorder_level' => 'inventory.reorder_level',
                 'cost_per_unit' => 'inventory.cost_per_unit',
                 'sku' => 'inventory.sku',
@@ -165,7 +167,116 @@ class SalesController extends Controller
         ];
     }
 
-    public function actionCreate()
+    public function actionViewupdate($id)
+    {
+        $sales = Sales::find()
+            ->where(['id' => $id])
+            ->asArray()
+            ->one();
+
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Sales transaction not found'];
+        }
+
+        $items = SalesItems::find()
+            ->select([
+                'product_name' => 'i.product_name',
+                'reorder_level' => 'i.reorder_level',
+                'sku' => 'i.sku',
+                'i.tracking_method',
+                'sales_items.inventory_id',
+                'sales_items.price_per_unit AS price',
+                'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold', 
+                'SUM(COALESCE(sales_items.total, 0)) AS total', 
+                'SUM(COALESCE(b.current_qty, 0)) AS current_qty', 
+            ])
+            ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
+            ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
+            ->where(['sales_items.sales_id' => $id])
+            ->groupBy(['sales_items.inventory_id'])
+            ->asArray()
+            ->all();
+
+        // add allocated_batches
+        foreach ($items as &$item) {
+            if ($item['tracking_method'] == 'batch_monitored') {
+                $allocated_batches = SalesItems::find()
+                    ->select([
+                        // 'sales_items.*',
+                        'sales_id' => 'sales_items.sales_id',
+                        'quantity_out' => 'sales_items.qty_sold',
+                        'sales_items.price_per_unit',
+                        'sales_items.total',
+                        'sales_items.inventory_id',
+                        'product_name' => 'i.product_name',
+                        'reorder_level' => 'i.reorder_level',
+                        'cost_per_unit' => 'b.cost_per_unit',
+                        'batch_id' => 'b.id',
+                        // 'sku' => 'i.sku',
+                        // 'i.tracking_method',
+                    ])
+                    ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
+                    ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
+                    ->where(['sales_items.sales_id' => $id])
+                    ->andWhere(['sales_items.inventory_id' => $item['inventory_id']])
+                    ->asArray()
+                    ->all();
+                $item['allocated_batches'] = $allocated_batches;
+
+                unset($item); // because we use &$item
+            }
+        }
+
+
+        $sales['items'] = $items;
+
+        return [
+            'success' => true,
+            'data' => $sales
+        ];
+    }
+
+    public function actionViewsales($id)
+    {
+        $sales = Sales::find()
+            ->where(['id' => $id])
+            ->asArray()
+            ->one();
+
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Sales transaction not found'];
+        }
+
+        $items = SalesItems::find()
+            ->select([
+                'sales_items.*',
+                'product_name' => 'i.product_name',
+                // 'current_qty' => 'inventory.current_qty',
+                'reorder_level' => 'i.reorder_level',
+                'cost_per_unit' => 'i.cost_per_unit',
+                'sku' => 'i.sku',
+                'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold',
+                'SUM(COALESCE(sales_items.total, 0)) AS total',  
+            ])
+            ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
+            ->groupBy([
+                'i.product_name'
+            ])
+            ->where(['sales_id' => $id])
+            ->asArray()
+            ->all();
+
+        $sales['items'] = $items;
+
+        return [
+            'success' => true,
+            'data' => $sales
+        ];
+    }
+
+    public function actionCreate_1()
     {
         if (Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -292,7 +403,619 @@ class SalesController extends Controller
         }
     }
 
-    public function actionUpdate()
+    public function actionCreate_2()
+    {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $requestData = Yii::$app->request->post();
+
+        // Validate parent sales document rules
+        $data = new Sales();
+        $data->load($requestData, '');
+
+        if (!$data->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $data->errors];
+        }
+
+        if (!isset($requestData['items']) || !is_array($requestData['items']) || count($requestData['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            $sales = new Sales();
+            $sales->customer_name = $requestData['customer_name'] ?? null;
+            $sales->invoice_no = $requestData['invoice_no'] ?? null;
+            $sales->date_sold = $requestData['date_sold'] ?? date('Y-m-d');
+            $sales->payment_status = $requestData['payment_status'] ?? 'draft';
+            $sales->payment_method = $requestData['payment_method'] ?? null;
+            $sales->amount = (float)($requestData['amount'] ?? 0);
+            $sales->remarks = $requestData['remarks'] ?? null;
+            $sales->date_created = date('Y-m-d H:i:s');
+            $sales->added_by = $requestData['added_by'] ?? null;
+            $sales->status = $requestData['status'] ?? 'draft';
+            $sales->is_paid = $requestData['is_paid'] ?? ($requestData['payment_status'] == 'cash' ? 'yes' : 'no');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            $itemsData = $requestData['items'];
+            $processedPairs = []; // 🌟 Array to trace payload input footprints
+
+            foreach ($itemsData as $itemData) {
+                // 1. Verify Item Master Exists
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item not found in inventory"];
+                }
+
+                $qtySold = (int)($itemData['quantity'] ?? 0);
+                $pricePerUnit = (float)($itemData['price'] ?? 0);
+                $batchId = $itemData['batch_id'] ?? null;
+
+                // 2. Validate row inputs
+                if ($qtySold < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['quantity_'.$inventory->id => ['Invalid quantity.']]];
+                }
+
+                if ($pricePerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['price_'.$inventory->id => ['Invalid price.']]];
+                }
+
+                if (empty($batchId)) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ['Batch selection is required for sales.']]];
+                }
+
+                // 🌟 STRICT PAYLOAD DUPLICATION GUARD
+                // Compiles a signature string matching item + batch + price + quantity
+                $payloadKey = $inventory->id . '-' . $batchId . '-' . $pricePerUnit . '-' . $qtySold;
+                
+                if (isset($processedPairs[$payloadKey])) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'error' => 'Validation failed',
+                        'errors' => [
+                            'items' => ["Duplicate Row Blocked: An identical entry for '{$inventory->product_name}' pulled from the same batch with the same price and quantity exists inside this form submission."]
+                        ]
+                    ];
+                }
+                $processedPairs[$payloadKey] = true;
+
+                // 3. Process Live Stock Operations (Skip validation if parent document is just a draft)
+                $costPerUnit = 0.00; // Fallback initial configuration state
+
+                if ($sales->status === 'approved') {
+                    // Fetch and lock the specific batch pool assigned by the frontend selection
+                    $batch = InventoryBatches::find()
+                        ->where(['id' => $batchId, 'inventory_id' => $inventory->id])
+                        ->forUpdate()
+                        ->one();
+
+                    if (!$batch) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Selected batch pool was not found or matches a separate item code for '{$inventory->product_name}'."];
+                    }
+
+                    // Strictly check live availability levels inside the isolated batch record
+                    if ($batch->current_qty < $qtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return [
+                            'error' => 'Validation failed', 
+                            'errors' => ['quantity_'.$inventory->id => ["Insufficient stock in the selected batch. Available: {$batch->current_qty} units."]]
+                        ];
+                    }
+
+                    // Deduct the inventory volumes safely
+                    $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $qtySold]);
+                    if (!$batch->save(false)) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to deduct stock from batch layer for '{$inventory->product_name}'."];
+                    }
+
+                    // Extract exact batch baseline cost value for financial reporting calculations
+                    $costPerUnit = (float)$batch->cost_per_unit;
+
+                    // Update Master Inventory Counters (Total Sold tracking metric)
+                    $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $qtySold]);
+                    if ($pricePerUnit > 0) {
+                        $inventory->price_per_unit = $pricePerUnit;
+                    }
+
+                    if (!$inventory->save(false)) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to update master product summaries for '{$inventory->product_name}'."];
+                    }
+                } else {
+                    // If the transaction is saved as a draft document, fetch the cost via normal un-isolated reading routines
+                    $batch = InventoryBatches::findOne(['id' => $batchId, 'inventory_id' => $inventory->id]);
+                    if ($batch) {
+                        $costPerUnit = (float)$batch->cost_per_unit;
+                    }
+                }
+
+                // 4. Save Sales Item Line Record
+                $salesItem = new SalesItems();
+                $salesItem->sales_id = $sales->id;
+                $salesItem->inventory_id = $inventory->id;
+                $salesItem->batch_id = $batchId;
+                $salesItem->qty_sold = $qtySold;
+                $salesItem->price_per_unit = $pricePerUnit;
+                $salesItem->cost_per_unit = $costPerUnit; // Saved explicitly for historical cost reference
+
+                if (!$salesItem->save()) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'errors' => $salesItem->getErrors()];
+                }
+            }
+
+            // Write actions to the global transaction audit trail
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'create',
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $itemsData
+                ]),
+                'updated_by' => $sales->added_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice created successfully.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }    
+
+    public function actionCreate_3()
+    {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $requestData = Yii::$app->request->post();
+
+        // Validate parent sales document rules
+        $data = new Sales();
+        $data->load($requestData, '');
+
+        if (!$data->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $data->errors];
+        }
+
+        if (!isset($requestData['items']) || !is_array($requestData['items']) || count($requestData['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            $sales = new Sales();
+            $sales->customer_name = $requestData['customer_name'] ?? null;
+            $sales->invoice_no = $requestData['invoice_no'] ?? null;
+            $sales->date_sold = $requestData['date_sold'] ?? date('Y-m-d');
+            $sales->payment_status = $requestData['payment_status'] ?? 'draft';
+            $sales->payment_method = $requestData['payment_method'] ?? null;
+            $sales->amount = (float)($requestData['amount'] ?? 0);
+            $sales->remarks = $requestData['remarks'] ?? null;
+            $sales->date_created = date('Y-m-d H:i:s');
+            $sales->added_by = $requestData['added_by'] ?? null;
+            $sales->status = $requestData['status'] ?? 'draft';
+            $sales->is_paid = $requestData['is_paid'] ?? ($requestData['payment_status'] == 'cash' ? 'yes' : 'no');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            $itemsData = $requestData['items'];
+
+            foreach ($itemsData as $itemData) {
+                // 1. Verify Item Master Exists
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ["Item not found in inventory."]]];
+                }
+
+                $totalQtySold = (int)($itemData['quantity'] ?? 0);
+                $pricePerUnit = (float)($itemData['price'] ?? 0);
+
+                // Row-level base validations
+                if ($totalQtySold < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['quantity_' . $inventory->id => ['Invalid quantity.']]];
+                }
+                if ($pricePerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['price_' . $inventory->id => ['Invalid price.']]];
+                }
+
+                // 2. Fork Flow based on Tracking Method
+                // Assumed property names: 'batch_monitored' and 'standard'
+                if ($inventory->tracking_method === 'batch_monitored') {
+                    
+                    $allocatedBatches = $itemData['allocated_batches'] ?? [];
+                    if (empty($allocatedBatches)) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batches are required for batch-monitored item: '{$inventory->product_name}'."]]];
+                    }
+
+                    // Verify sum of allocations matches frontend totals
+                    $sumAllocated = array_sum(array_column($allocatedBatches, 'quantity_out'));
+                    if ($sumAllocated !== $totalQtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
+                    }
+
+                    // Process manual batch allocations
+                    foreach ($allocatedBatches as $allocated) {
+                        $batchId = $allocated['batch_id'];
+                        $qtyOut = (int)$allocated['quantity_out'];
+                        $costPerUnit = 0.00;
+
+                        if ($sales->status === 'approved') {
+                            // $batch = InventoryBatches::find()
+                            //     ->where(['id' => $batchId, 'inventory_id' => $inventory->id])
+                            //     ->forUpdate()
+                            //     ->one();
+
+                            // if (!$batch) {
+                            //     $transaction->rollBack();
+                            //     Yii::$app->response->statusCode = 422;
+                            //     return ['error' => 'Validation failed', 'errors' => ['items' => ["Batch pool ID {$batchId} not found for '{$inventory->product_name}'."]]];
+                            // }
+
+                            // if ($batch->current_qty < $qtyOut) {
+                            //     $transaction->rollBack();
+                            //     Yii::$app->response->statusCode = 422;
+                            //     return ['error' => 'Validation failed', 'errors' => ['quantity_' . $inventory->id => ["Insufficient stock in selected Batch #{$batchId}. Available: {$batch->current_qty} units."]]];
+                            // }
+
+                            // // Deduct explicit batch volume
+                            // $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $qtyOut]);
+                            // if (!$batch->save(false)) {
+                            //     $transaction->rollBack();
+                            //     Yii::$app->response->statusCode = 500;
+                            //     return ['error' => 'Database error', 'message' => "Failed to update batch layer tracking numbers."];
+                            // }
+                            // $costPerUnit = (float)$batch->cost_per_unit;
+                        } else {
+                            // Draft state fallback
+                            $batch = InventoryBatches::findOne(['id' => $batchId, 'inventory_id' => $inventory->id]);
+                            if ($batch) {
+                                $costPerUnit = (float)$batch->cost_per_unit;
+                            }
+                        }
+
+                        // Save line-item linked directly to this custom batch assignment
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit);
+                    }
+
+                } elseif ($inventory->tracking_method === 'standard') {
+                    // FIFO logic pipeline
+                    // Query batches ordered oldest to newest
+                    $batchesQuery = InventoryBatches::find()
+                        ->where(['inventory_id' => $inventory->id])
+                        ->andWhere(['>', 'current_qty', 0])
+                        ->orderBy(['id' => SORT_ASC]);
+
+                    // ONLY lock rows if we are actually committing live inventory changes
+                    // if ($sales->status === 'approved') {
+                    //     $batchesQuery->forUpdate();
+                    // }
+
+                    $availableBatches = $batchesQuery->all();
+
+                    // Validate global stock volume across available rows
+                    $totalAvailableStock = array_sum(array_column($availableBatches, 'current_qty'));
+                    
+                    if ($totalAvailableStock < $totalQtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return [
+                            'error' => 'Validation failed', 
+                            'errors' => ['items' => ["Insufficient total stock for {$inventory->product_name} [{$inventory->sku}]. Required: {$totalQtySold}, Total Available: {$totalAvailableStock}."]]
+                        ];
+                    }
+
+                    $remainderToDeduct = $totalQtySold;
+
+                    foreach ($availableBatches as $batch) {
+                        if ($remainderToDeduct <= 0) {
+                            break;
+                        }
+
+                        $currentBatchQty = (int)$batch->current_qty;
+                        // Deduct either what remains or up to the max capacity of this specific bucket layer
+                        $deductionAmount = min($currentBatchQty, $remainderToDeduct);
+                        $costPerUnit = (float)$batch->cost_per_unit;
+
+                        // ONLY deduct and save the batch if document status is approved
+                        if ($sales->status === 'approved') {
+                            // $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $deductionAmount]);
+                            // if (!$batch->save(false)) {
+                            //     $transaction->rollBack();
+                            //     Yii::$app->response->statusCode = 500;
+                            //     return ['error' => 'Database error', 'message' => "Failed to execute FIFO deduction calculations."];
+                            // }
+                        }
+
+                        // 🌟 Saves perfectly for BOTH draft and approved! 
+                        // For draft, it assigns the expected batch_id without touching inventory counters.
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+                        
+                        $remainderToDeduct -= $deductionAmount;
+                    }
+                }
+
+                // 3. Update Master Metrics (Only for Approved updates)
+                if ($sales->status === 'approved') {
+                    // $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $totalQtySold]);
+                    // if ($pricePerUnit > 0) {
+                    //     $inventory->price_per_unit = $pricePerUnit;
+                    // }
+                    // if (!$inventory->save(false)) {
+                    //     $transaction->rollBack();
+                    //     Yii::$app->response->statusCode = 500;
+                    //     return ['error' => 'Database error', 'message' => "Master tracking summary updates failed."];
+                    // }
+                }
+            }
+
+            // Write actions to global transaction audit trail
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'create',
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $itemsData
+                ]),
+                'updated_by' => $sales->added_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice created successfully.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    } 
+
+    public function actionCreate()
+    {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $requestData = Yii::$app->request->post();
+
+        // Validate parent sales document rules
+        $data = new Sales();
+        $data->load($requestData, '');
+
+        if (!$data->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $data->errors];
+        }
+
+        if (!isset($requestData['items']) || !is_array($requestData['items']) || count($requestData['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            $sales = new Sales();
+            $sales->customer_name = $requestData['customer_name'] ?? null;
+            $sales->invoice_no = $requestData['invoice_no'] ?? null;
+            $sales->date_sold = $requestData['date_sold'] ?? date('Y-m-d');
+            $sales->payment_status = $requestData['payment_status'] ?? 'draft';
+            $sales->payment_method = $requestData['payment_method'] ?? null;
+            $sales->amount = (float)($requestData['amount'] ?? 0);
+            $sales->remarks = $requestData['remarks'] ?? null;
+            $sales->date_created = date('Y-m-d H:i:s');
+            $sales->added_by = $requestData['added_by'] ?? null;
+            $sales->status = $requestData['status'] ?? 'draft';
+            $sales->is_paid = $requestData['is_paid'] ?? ($requestData['payment_status'] == 'cash' ? 'yes' : 'no');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            $itemsData = $requestData['items'];
+
+            foreach ($itemsData as $itemData) {
+                // 1. Verify Item Master Exists
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ["Item not found in inventory."]]];
+                }
+
+                $totalQtySold = (int)($itemData['quantity'] ?? 0);
+                $pricePerUnit = (float)($itemData['price'] ?? 0);
+
+                // Row-level base validations
+                if ($totalQtySold < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['quantity_' . $inventory->id => ['Invalid quantity.']]];
+                }
+                if ($pricePerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['price_' . $inventory->id => ['Invalid price.']]];
+                }
+
+                // 2. Fork Flow based on Tracking Method
+                // Assumed property names: 'batch_monitored' and 'standard'
+                if ($inventory->tracking_method === 'batch_monitored') {
+                    
+                    $allocatedBatches = $itemData['allocated_batches'] ?? [];
+                    if (empty($allocatedBatches)) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batches are required for batch-monitored item: '{$inventory->product_name}'."]]];
+                    }
+
+                    // Verify sum of allocations matches frontend totals
+                    $sumAllocated = array_sum(array_column($allocatedBatches, 'quantity_out'));
+                    if ($sumAllocated !== $totalQtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
+                    }
+
+                    // Process manual batch allocations
+                    foreach ($allocatedBatches as $allocated) {
+                        $batchId = $allocated['batch_id'];
+                        $qtyOut = (int)$allocated['quantity_out'];
+                        $costPerUnit = 0.00;
+
+                        // Draft state fallback
+                        $batch = InventoryBatches::findOne(['id' => $batchId, 'inventory_id' => $inventory->id]);
+                        if ($batch) {
+                            $costPerUnit = (float)$batch->cost_per_unit;
+                        }
+
+                        // Save line-item linked directly to this custom batch assignment
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit);
+                    }
+
+                } elseif ($inventory->tracking_method === 'standard') {
+                    // FIFO logic pipeline
+                    // Query batches ordered oldest to newest
+                    $batchesQuery = InventoryBatches::find()
+                        ->where(['inventory_id' => $inventory->id])
+                        ->andWhere(['>', 'current_qty', 0])
+                        ->orderBy(['id' => SORT_ASC]);
+
+                    $availableBatches = $batchesQuery->all();
+
+                    // Validate global stock volume across available rows
+                    $totalAvailableStock = array_sum(array_column($availableBatches, 'current_qty'));
+                    
+                    if ($totalAvailableStock < $totalQtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return [
+                            'error' => 'Validation failed', 
+                            'errors' => ['items' => ["Insufficient total stock for {$inventory->product_name} [{$inventory->sku}]. Required: {$totalQtySold}, Total Available: {$totalAvailableStock}."]]
+                        ];
+                    }
+
+                    $remainderToDeduct = $totalQtySold;
+
+                    foreach ($availableBatches as $batch) {
+                        if ($remainderToDeduct <= 0) {
+                            break;
+                        }
+
+                        $currentBatchQty = (int)$batch->current_qty;
+                        // Deduct either what remains or up to the max capacity of this specific bucket layer
+                        $deductionAmount = min($currentBatchQty, $remainderToDeduct);
+                        $costPerUnit = (float)$batch->cost_per_unit;
+
+                        // 🌟 Saves perfectly for BOTH draft and approved! 
+                        // For draft, it assigns the expected batch_id without touching inventory counters.
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+                        
+                        $remainderToDeduct -= $deductionAmount;
+                    }
+                }
+            }
+
+            // Write actions to global transaction audit trail
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'create',
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $itemsData
+                ]),
+                'updated_by' => $sales->added_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice created successfully.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Helper utility function to save individual sales lines cleanly
+     */
+    private function saveSalesItemRow($salesId, $inventoryId, $batchId, $qty, $price, $cost)
+    {
+        $salesItem = new SalesItems();
+        $salesItem->sales_id = $salesId;
+        $salesItem->inventory_id = $inventoryId;
+        $salesItem->batch_id = $batchId;
+        $salesItem->qty_sold = $qty;
+        $salesItem->price_per_unit = $price;
+        $salesItem->cost_per_unit = $cost;
+
+        if (!$salesItem->save()) {
+            throw new \yii\db\Exception("Failed saving line row properties: " . json_encode($salesItem->getErrors()));
+        }
+    }
+
+    public function actionUpdateOld()
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -445,7 +1168,412 @@ class SalesController extends Controller
         }
     }
 
-    public function actionApprove() 
+    public function actionUpdate_1()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+        $invoice_no = $request->getBodyParam('invoice_no') ?? ($data['invoice_no'] ?? null);
+
+        if (empty($invoice_no)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['invoice_no' => ['Invoice number is required.']]];
+        }
+
+        $sales = Sales::findOne(['invoice_no' => $invoice_no]);
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => "Invoice '{$invoice_no}' not found."];
+        }
+
+        // Keep track of previous state before processing updates
+        $oldStatus = $sales->status;
+        $oldData = $sales->attributes;
+
+        $sales->load($data, '');
+        if (!$sales->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $sales->errors];
+        }
+
+        if (!isset($data['items']) || !is_array($data['items']) || count($data['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Set update tracking timestamps
+            $sales->date_updated = date('Y-m-d H:i:s');
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                return ['success' => false, 'errors' => $sales->getErrors()];
+            }
+
+            $newItems = $data['items'];
+            $oldItems = SalesItems::findAll(['sales_id' => $sales->id]);
+            $oldItemsToDelete = [];
+
+            // 🔄 STEP 1: If the old invoice was already approved, return stock back to its specific batch layers first
+            if ($oldStatus === 'approved') {
+                // foreach ($oldItems as $oldItem) {
+                //     $oldItemsToDelete[] = $oldItem->attributes;
+
+                //     // Lock and find the specific original batch used
+                //     if (!empty($oldItem->batch_id)) {
+                //         $batchQuery = InventoryBatches::find()->where(['id' => $oldItem->batch_id, 'inventory_id' => $oldItem->inventory_id]);
+                //         $batchCmd = $batchQuery->createCommand();
+                //         $oldBatch = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->one();
+
+                //         if ($oldBatch) {
+                //             // Corrected: Safely ADD stock back to the original layer pool
+                //             $oldBatch->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $oldItem->qty_sold]);
+                //             $oldBatch->save(false);
+                //         }
+                //     }
+
+                //     // Roll back master counter metrics tracking
+                //     $inventory = Inventory::findOne($oldItem->inventory_id);
+                //     if ($inventory) {
+                //         $inventory->total_sold = new \yii\db\Expression('GREATEST(0, COALESCE(total_sold, 0) - :qty)', [':qty' => $oldItem->qty_sold]);
+                //         $inventory->save(false);
+                //     }
+                // }
+            } else {
+                // Document was just a draft, capture properties for audit logs before wiping lines
+                foreach ($oldItems as $oldItem) {
+                    $oldItemsToDelete[] = $oldItem->attributes;
+                }
+            }
+
+            // Wipe previous line entries cleanly before writing new ones
+            SalesItems::deleteAll(['sales_id' => $sales->id]);
+
+            $processedPairs = [];
+
+            // 📥 STEP 2: Process new lines coming from payload configuration
+            foreach ($newItems as $itemData) {
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item ID {$itemData['inventory_id']} not found in database catalog."];
+                }
+
+                $qtySold = (int)($itemData['quantity'] ?? 0);
+                $pricePerUnit = (float)($itemData['price'] ?? 0);
+                $batchId = $itemData['batch_id'] ?? null;
+
+                // Row-level property checks
+                if ($qtySold < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['quantity_' . $inventory->id => ['Invalid quantity value.']]];
+                }
+
+                if ($pricePerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['price_' . $inventory->id => ['Invalid price value.']]];
+                }
+
+                if (empty($batchId)) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ['Batch allocation is required.']]];
+                }
+
+                // Payloads collision guard check
+                $payloadKey = $inventory->id . '-' . $batchId . '-' . $pricePerUnit . '-' . $qtySold;
+                if (isset($processedPairs[$payloadKey])) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'error' => 'Validation failed',
+                        'errors' => ['items' => ["Duplicate Entry Detected: Identical line for '{$inventory->product_name}' extracted from the same stock layer batch."]]
+                    ];
+                }
+                $processedPairs[$payloadKey] = true;
+
+                $costPerUnit = 0.00;
+
+                // ⚡ STEP 3: If new invoice status is approved, validate limits and deduct from batch layers
+                if ($sales->status === 'approved') {
+                    $batchQuery = InventoryBatches::find()->where(['id' => $batchId, 'inventory_id' => $inventory->id]);
+                    $batchCmd = $batchQuery->createCommand();
+                    $batch = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->one();
+
+                    if (!$batch) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Stock layer batch pool was not found for '{$inventory->product_name}'."];
+                    }
+
+                    if ($batch->current_qty < $qtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return [
+                            'error' => 'Validation failed',
+                            'errors' => ['quantity_' . $inventory->id => ["Insufficient stock in selected batch layer. Available: {$batch->current_qty} units."]]
+                        ];
+                    }
+
+                    // Deduct safely from specific batch layer
+                    $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $qtySold]);
+                    if (!$batch->save(false)) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to update stock layer parameters."];
+                    }
+
+                    $costPerUnit = (float)$batch->cost_per_unit;
+
+                    // Update master totals summaries tracking
+                    $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $qtySold]);
+                    if ($pricePerUnit > 0) {
+                        $inventory->price_per_unit = $pricePerUnit;
+                    }
+                    $inventory->save(false);
+                } else {
+                    // If it remains a draft or changes back to a draft, read cost tracking without execution locks
+                    $batch = InventoryBatches::findOne(['id' => $batchId, 'inventory_id' => $inventory->id]);
+                    if ($batch) {
+                        $costPerUnit = (float)$batch->cost_per_unit;
+                    }
+                }
+
+                // Save line record history
+                $salesItem = new SalesItems();
+                $salesItem->sales_id = $sales->id;
+                $salesItem->inventory_id = $inventory->id;
+                $salesItem->batch_id = $batchId;
+                $salesItem->qty_sold = $qtySold;
+                $salesItem->price_per_unit = $pricePerUnit;
+                $salesItem->cost_per_unit = $costPerUnit;
+
+                if (!$salesItem->save()) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'errors' => $salesItem->getErrors()];
+                }
+            }
+
+            // ✅ File changes to global transaction history logging tables
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'update',
+                'old_data' => json_encode([
+                    'sales' => $oldData,
+                    'items' => $oldItemsToDelete 
+                ]),
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $newItems 
+                ]),
+                'updated_by' => $sales->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales transaction updated and inventory balances synchronized successfully.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionUpdate()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $requestData = $request->post();
+        $invoice_no = $request->getBodyParam('invoice_no') ?? ($requestData['invoice_no'] ?? null);
+
+        if (empty($invoice_no)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['invoice_no' => ['Invoice number is required.']]];
+        }
+
+        $sales = Sales::findOne(['invoice_no' => $invoice_no]);
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => "Invoice '{$invoice_no}' not found."];
+        }
+
+        // Keep track of previous state before processing updates
+        $oldData = $sales->attributes;
+
+        $sales->load($requestData, '');
+        if (!$sales->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $sales->errors];
+        }
+
+        if (!isset($requestData['items']) || !is_array($requestData['items']) || count($requestData['items']) === 0) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Set update tracking timestamps
+            $sales->date_updated = date('Y-m-d H:i:s');
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            $newItems = $requestData['items'];
+            $oldItems = SalesItems::findAll(['sales_id' => $sales->id]);
+            $oldItemsToDelete = [];
+
+            // Document is a draft, capture properties for audit logs before wiping lines
+            foreach ($oldItems as $oldItem) {
+                $oldItemsToDelete[] = $oldItem->attributes;
+            }
+
+            // Wipe previous line entries cleanly before writing new ones
+            SalesItems::deleteAll(['sales_id' => $sales->id]);
+
+            // 📥 STEP 2: Process new lines coming from payload configuration (Draft State ONLY)
+            foreach ($newItems as $itemData) {
+                $inventory = Inventory::findOne(['id' => $itemData['inventory_id']]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ["Item not found in inventory."]]];
+                }
+
+                $totalQtySold = (int)($itemData['quantity'] ?? 0);
+                $pricePerUnit = (float)($itemData['price'] ?? 0);
+
+                // Row-level base validations
+                if ($totalQtySold < 1) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['quantity_' . $inventory->id => ['Invalid quantity.']]];
+                }
+                if ($pricePerUnit <= 0) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['price_' . $inventory->id => ['Invalid price.']]];
+                }
+
+                // 2. Fork Flow based on Tracking Method (Draft-only behavior)
+                if ($inventory->tracking_method === 'batch_monitored') {
+                    
+                    $allocatedBatches = $itemData['allocated_batches'] ?? [];
+                    if (empty($allocatedBatches)) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batches are required for batch-monitored item: '{$inventory->product_name}'."]]];
+                    }
+
+                    // Verify sum of allocations matches frontend totals
+                    $sumAllocated = array_sum(array_column($allocatedBatches, 'quantity_out'));
+                    if ($sumAllocated !== $totalQtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
+                    }
+
+                    // Process manual batch allocations for draft
+                    foreach ($allocatedBatches as $allocated) {
+                        $batchId = $allocated['batch_id'];
+                        $qtyOut = (int)$allocated['quantity_out'];
+                        $costPerUnit = 0.00;
+
+                        $batch = InventoryBatches::findOne(['id' => $batchId, 'inventory_id' => $inventory->id]);
+                        if ($batch) {
+                            $costPerUnit = (float)$batch->cost_per_unit;
+                        }
+
+                        // Save line-item linked directly to this custom batch assignment without touching counters
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit);
+                    }
+
+                } elseif ($inventory->tracking_method === 'standard') {
+                    // FIFO logic pipeline for draft (Assigns expected batches without changing counters)
+                    $batchesQuery = InventoryBatches::find()
+                        ->where(['inventory_id' => $inventory->id])
+                        ->andWhere(['>', 'current_qty', 0])
+                        ->orderBy(['id' => SORT_ASC]);
+
+                    $availableBatches = $batchesQuery->all();
+
+                    // Validate global stock volume across available rows
+                    $totalAvailableStock = array_sum(array_column($availableBatches, 'current_qty'));
+                    if ($totalAvailableStock < $totalQtySold) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return [
+                            'error' => 'Validation failed', 
+                            'errors' => ['items' => ["Insufficient total stock for {$inventory->product_name} [{$inventory->sku}]. Required: {$totalQtySold}, Total Available: {$totalAvailableStock}."]]
+                        ];
+                    }
+
+                    $remainderToDeduct = $totalQtySold;
+
+                    foreach ($availableBatches as $batch) {
+                        if ($remainderToDeduct <= 0) {
+                            break;
+                        }
+
+                        $currentBatchQty = (int)$batch->current_qty;
+                        $deductionAmount = min($currentBatchQty, $remainderToDeduct);
+                        $costPerUnit = (float)$batch->cost_per_unit;
+
+                        // Assign expected batch parameters safely
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+                        
+                        $remainderToDeduct -= $deductionAmount;
+                    }
+                }
+            }
+
+            // Write actions to global transaction audit trail
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'update',
+                'old_data' => json_encode([
+                    'sales' => $oldData,
+                    'items' => $oldItemsToDelete
+                ]),
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => $newItems
+                ]),
+                'updated_by' => $sales->added_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice draft updated successfully.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionApprove_1() 
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -540,6 +1668,314 @@ class SalesController extends Controller
             ];
         } catch (\Exception $e) {
             $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionApprove_2() 
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $data = $request->post();
+        
+        if (empty($data['invoice_no'])) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['invoice_no' => ['Invoice number is required.']]];
+        }
+
+        $sales = Sales::findOne(['invoice_no' => $data['invoice_no']]);
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => "Invoice '{$data['invoice_no']}' not found."];
+        }
+
+        if ($sales->status === 'approved') {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Action blocked', 'errors' => ['status' => ['This transaction is already approved.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            $sales->status = 'approved'; 
+            $sales->updated_by = $data['updated_by'] ?? null;
+            $sales->date_updated = date('Y-m-d H:i:s');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['success' => false, 'errors' => $sales->getErrors()];
+            }
+
+            $itemDatas = SalesItems::findAll(['sales_id' => $sales->id]);
+            if (empty($itemDatas)) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => ['items' => ['This invoice contains no item lines.']]];
+            }
+
+            foreach ($itemDatas as $itemData) {
+                $inventory = Inventory::findOne(['id' => $itemData->inventory_id]);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Item ID {$itemData->inventory_id} not found."];
+                }
+
+                if (empty($itemData->batch_id)) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ["item_{$inventory->id}" => ["No batch layer assigned to item '{$inventory->product_name}'."]]];
+                }
+
+                // 🔒 Lock the specific batch from inventory_batches
+                // $batch = InventoryBatches::find()
+                //     ->where(['id' => $itemData->batch_id, 'inventory_id' => $inventory->id])
+                //     ->forUpdate()
+                //     ->one();
+                $query = InventoryBatches::find()->where(['id' => $itemData->batch_id, 'inventory_id' => $inventory->id]);
+                $command = $query->createCommand();
+                $batch = InventoryBatches::findBySql($command->getSql() . ' FOR UPDATE', $command->params)->one();
+
+                if (!$batch) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Batch ID {$itemData->batch_id} not found for '{$inventory->product_name}'."];
+                }
+
+                if ($batch->current_qty < $itemData->qty_sold) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return [
+                        'error' => "Insufficient stock for {$inventory->product_name}. Available: {$batch->current_qty} units.", 
+                        // 'error' => ["quantity_{$inventory->id}" => ["Insufficient stock. Available: {$batch->current_qty} units."]]
+                    ];
+                }
+
+                // Deduct from the live batch pool
+                $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $itemData->qty_sold]);
+                if (!$batch->save(false)) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Failed to update batch layer."];
+                }
+
+                // Lock back-calculated batch cost into history line
+                $itemData->cost_per_unit = (float)$batch->cost_per_unit; 
+                if (!$itemData->save(false)) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Failed to write cost margins."];
+                }
+
+                // Update master tracking counters
+                $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $itemData->qty_sold]);
+                if ($itemData->price_per_unit > 0) {
+                    $inventory->price_per_unit = $itemData->price_per_unit;
+                }
+
+                if (!$inventory->save(false)) {
+                    $transaction->rollBack();
+                    return ['success' => false, 'error' => "Failed to update product master summaries."];
+                }
+            }
+
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'approve',
+                'new_data' => json_encode([
+                    'sales' => $sales->attributes,
+                    'items' => array_map(function($item) { return $item->attributes; }, $itemDatas) 
+                ]),
+                'updated_by' => $sales->updated_by,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales transaction approved successfully.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public function actionApprove()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $requestData = $request->post();
+        $invoice_no = $request->getBodyParam('invoice_no') ?? ($requestData['invoice_no'] ?? null);
+
+        if (empty($invoice_no)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['invoice_no' => ['Invoice number is required.']]];
+        }
+
+        // Fetch the target sales record
+        $sales = Sales::findOne(['invoice_no' => $invoice_no]);
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => "Invoice '{$invoice_no}' not found."];
+        }
+
+        // Concurrency Guard: Ensure it hasn't been approved already
+        if ($sales->status === 'approved') {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['status' => ["Invoice '{$invoice_no}' is already approved."]]];
+        }
+
+        $oldData = $sales->attributes;
+        $salesItems = SalesItems::findAll(['sales_id' => $sales->id]);
+
+        if (empty($salesItems)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Cannot approve an empty invoice. Add at least one item.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Update primary document tracking properties
+            $sales->status = 'approved';
+            $sales->payment_status = $requestData['payment_status'] ?? $sales->payment_status;
+            $sales->is_paid = $requestData['is_paid'] ?? ($sales->payment_status == 'cash' ? 'yes' : $sales->is_paid);
+            $sales->date_updated = date('Y-m-d H:i:s');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            // Group existing saved draft lines by item to validate collective stock layers safely
+            $itemsGrouped = [];
+            foreach ($salesItems as $item) {
+                $itemsGrouped[$item->inventory_id][] = $item;
+            }
+
+            // Process approvals and deduct stock layers matching your tracking method rules
+            foreach ($itemsGrouped as $inventoryId => $lines) {
+                $inventory = Inventory::findOne($inventoryId);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ["Inventory item ID {$inventoryId} no longer exists."]]];
+                }
+
+                if ($inventory->tracking_method === 'batch_monitored') {
+                    // For batch-monitored, process item rows directly using row-level FOR UPDATE allocations
+                    foreach ($lines as $line) {
+                        $batchQuery = InventoryBatches::find()->where(['id' => $line->batch_id, 'inventory_id' => $inventory->id]);
+                        $batchCmd = $batchQuery->createCommand();
+                        $batch = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->one();
+
+                        if (!$batch || $batch->current_qty < $line->qty_sold) {
+                            $transaction->rollBack();
+                            Yii::$app->response->statusCode = 422;
+                            return [
+                                'error' => 'Validation failed',
+                                'errors' => ['quantity_' . $inventory->id => ["Insufficient stock in assigned batch layer for '{$inventory->product_name}'. available: " . ($batch ? $batch->current_qty : 0)]]
+                            ];
+                        }
+
+                        // Atomic stock deduction
+                        $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $line->qty_sold]);
+                        $batch->save(false);
+
+                        // Update product master summary metric
+                        $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $line->qty_sold]);
+                        if ($line->price_per_unit > 0) {
+                            $inventory->price_per_unit = $line->price_per_unit;
+                        }
+                        $inventory->save(false);
+                    }
+
+                } elseif ($inventory->tracking_method === 'standard') {
+                    // Total up what this draft originally required for a standard FIFO verification pass
+                    $totalQtyRequired = array_sum(array_column($lines, 'qty_sold'));
+
+                    // Re-query current live valid FIFO pools using SELECT ... FOR UPDATE to handle live concurrency
+                    $batchesQuery = InventoryBatches::find()
+                        ->where(['inventory_id' => $inventory->id])
+                        ->andWhere(['>', 'current_qty', 0])
+                        ->orderBy(['id' => SORT_ASC]);
+                    $batchCmd = $batchesQuery->createCommand();
+                    $availableBatches = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->all();
+
+                    $totalAvailableStock = array_sum(array_column($availableBatches, 'current_qty'));
+                    if ($totalAvailableStock < $totalQtyRequired) {
+                        $transaction->rollBack();
+                        Yii::$app->response->statusCode = 422;
+                        return [
+                            'error' => 'Validation failed',
+                            'errors' => ['items' => ["Stock balances shifted! Insufficient stock for standard item '{$inventory->product_name}'. Required: {$totalQtyRequired}, Available: {$totalAvailableStock}."]]
+                        ];
+                    }
+
+                    // Re-run real-time assignment to reflect actual current state safely
+                    // Step A: Clear the draft rows for this specific item inside this transaction
+                    SalesItems::deleteAll(['sales_id' => $sales->id, 'inventory_id' => $inventory->id]);
+
+                    $remainderToDeduct = $totalQtyRequired;
+
+                    foreach ($availableBatches as $batch) {
+                        if ($remainderToDeduct <= 0) {
+                            break;
+                        }
+
+                        $currentBatchQty = (int)$batch->current_qty;
+                        $deductionAmount = min($currentBatchQty, $remainderToDeduct);
+                        $costPerUnit = (float)$batch->cost_per_unit;
+                        $pricePerUnit = (float)$lines[0]->price_per_unit; // Inherit original unit pricing
+
+                        // Deduct from current batch row
+                        $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $deductionAmount]);
+                        $batch->save(false);
+
+                        // Update master summaries tracker metrics
+                        $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $deductionAmount]);
+                        if ($pricePerUnit > 0) {
+                            $inventory->price_per_unit = $pricePerUnit;
+                        }
+                        $inventory->save(false);
+
+                        // Re-write final synchronized item line row parameters
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+
+                        $remainderToDeduct -= $deductionAmount;
+                    }
+                }
+            }
+
+            // Write validation action event parameters cleanly into audit database logs
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'approve',
+                'old_data' => json_encode(['status' => $oldData['status']]),
+                'new_data' => json_encode(['status' => $sales->status]),
+                'updated_by' => $requestData['approved_by'] ?? ($sales->added_by),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice approved successfully and stock deductions executed.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
             return ['success' => false, 'error' => $e->getMessage()];
         }
     }
@@ -713,6 +2149,75 @@ class SalesController extends Controller
         return [
             'success' => true,
             'trnxno' => $prefix . $date . $lastId,
+        ];
+    }
+
+    public function actionStockbatches($id) 
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $query_main = Inventory::find()
+            ->alias('i')
+            ->select([
+                'i.id AS inventory_id',
+                'i.product_name',
+                'i.sku',
+                'i.price_per_unit', // Selling Price
+                'i.reorder_level',
+                'i.type',
+                'SUM(COALESCE(b.current_qty, 0)) AS current_qty',        // Combined total stock across all active batches
+                // 'MAX(COALESCE(b.cost_per_unit, 0.00)) AS cost_per_unit', // Reference baseline cost (Displays highest batch cost)
+            ])
+            ->leftJoin('inventory_batches b', 'i.id = b.inventory_id')
+            ->groupBy([
+                'i.id', 'i.product_name', 'i.sku', 'i.price_per_unit', 
+                'i.reorder_level', 'i.type'
+            ])
+            ->where(['inventory_id' => $id]);
+        // $totalCountMain = $query_main->count();
+        // $items_main = $query_main->asArray()->all();
+        $info = $query_main->asArray()->one();
+
+        $query = Inventory::find()
+            ->alias('i')
+            ->select([
+                'i.id AS inventory_id',
+                'i.product_name',
+                'i.sku',
+                'i.price_per_unit', // Selling Price
+                'i.reorder_level',
+                'i.type',
+                'b.date_received',
+                'b.cost_per_unit',
+                'b.current_qty',
+                'b.id',
+                new Expression('0 AS target_quantity')
+            ])
+            ->leftJoin('inventory_batches b', 'i.id = b.inventory_id')
+            ->where(['inventory_id' => $id]);
+        $query->orderBy(['b.date_received' => SORT_ASC]);
+        $totalCount = $query->count();
+        $items = $query->asArray()->all();
+
+        if (!$items) {
+            Yii::$app->response->statusCode = 404;
+            return ['success' => false, 'error' => 'Replenishment data not found'];
+        } 
+
+        $data['sku'] = $info['sku'];
+        $data['product_name'] = $info['product_name'];
+        $data['total_target_quantity'] = 0;
+        $data['current_qty'] = $info['current_qty'];
+        $data['reorder_level'] = $info['reorder_level'];
+        $data['items'] = $items;
+
+        return [
+            'success' => true,
+            'count' => $totalCount,
+            'data' => $data,
         ];
     }
 }

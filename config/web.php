@@ -67,6 +67,8 @@ $config = [
                 // API routes for Inventory 👇 CHANGED THESE TO INCLUDE OPTIONS
                 'GET,OPTIONS api/inventory/list' => 'inventory/list',
                 'GET,OPTIONS api/inventory/listsearch' => 'inventory/listsearch',
+                'GET,OPTIONS api/inventory/replenishmentlistsearch' => 'inventory/replenishmentlistsearch',
+                'GET,OPTIONS api/inventory/batcheslistsearch' => 'inventory/batcheslistsearch',
                 'POST,OPTIONS api/inventory/checksku' => 'inventory/checksku',
                 'POST,OPTIONS api/inventory/create' => 'inventory/create',
                 'PUT,OPTIONS api/inventory/update' => 'inventory/update',
@@ -89,6 +91,9 @@ $config = [
                 // API routes for Sales
                 'GET,OPTIONS api/sales/list' => 'sales/list',
                 'GET,OPTIONS api/sales/view' => 'sales/view',
+                'GET,OPTIONS api/sales/viewsales' => 'sales/viewsales',
+                'GET,OPTIONS api/sales/viewupdate' => 'sales/viewupdate',
+                'GET,OPTIONS api/sales/stockbatches' => 'sales/stockbatches',
                 'POST,OPTIONS api/sales/create' => 'sales/create',
                 'PUT,OPTIONS api/sales/update' => 'sales/update',
                 'PATCH,OPTIONS api/sales/update' => 'sales/update',
@@ -97,6 +102,15 @@ $config = [
                 'DELETE,OPTIONS api/sales/delete' => 'sales/delete',
                 'DELETE,OPTIONS api/sales/void' => 'sales/void',
                 'GET,OPTIONS api/sales/generatetrnxno' => 'sales/generatetrnxno',
+
+                // API routes for returns
+                'GET,OPTIONS api/returns/list' => 'returns/list',
+                'GET,OPTIONS api/returns/view' => 'returns/view',
+                'GET,OPTIONS api/returns/getinvoiceitems' => 'returns/getinvoiceitems',
+                'POST,OPTIONS api/returns/create' => 'returns/create',
+                'PUT,OPTIONS api/returns/approve' => 'returns/approve',
+                'PATCH,OPTIONS api/returns/approve' => 'returns/approve',
+                'GET,OPTIONS api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
             ],
         ],
         'formatter' => [
