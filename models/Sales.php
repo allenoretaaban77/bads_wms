@@ -48,7 +48,7 @@ class Sales extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['customer_name', 'invoice_no', 'payment_status', 'date_sold', 'amount'], 'required'],
+            [['invoice_no', 'payment_status', 'date_sold', 'amount'], 'required'],
             [['customer_name', 'invoice_no', 'payment_method', 'payment_status', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'active'],
             [['date_sold', 'date_created', 'date_updated'], 'safe'],

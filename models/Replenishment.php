@@ -44,7 +44,7 @@ class Replenishment extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['supplier', 'reference_no', 'date_received', 'amount'], 'required'],
+            [['reference_no', 'date_received', 'amount'], 'required'],
             [['supplier', 'reference_no', 'added_by', 'updated_by', 'hash'], 'default', 'value' => null],
             [['record_status'], 'default', 'value' => 'active'],
             [['date_received', 'date_created', 'date_updated'], 'safe'],
