@@ -98,6 +98,18 @@ class SalesController extends Controller
             ]);
         }
 
+        // 🎯 Filters
+        $filters = [
+            'status' => $request->get('status'),
+            'payment_status' => $request->get('payment_status'),
+            'is_paid' => $request->get('is_paid'),
+        ];
+        foreach ($filters as $field => $value) {
+            if (!empty($value)) {
+                $query->andWhere([$field => $value]);
+            }
+        }
+
         // 📄 Pagination
         $page = (int)$request->get('page', 1);
         $pageSize = (int)$request->get('pageSize', 10);
@@ -2219,5 +2231,51 @@ class SalesController extends Controller
             'count' => $totalCount,
             'data' => $data,
         ];
+    }
+
+    public function actionSetpaidunpaid()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $invoiceNo = Yii::$app->request->getBodyParam('invoice_no');
+        $isPaid    = Yii::$app->request->getBodyParam('is_paid'); // expected 'yes' or 'no'
+        $updatedBy = Yii::$app->request->getBodyParam('updated_by');
+
+        if (!in_array($isPaid, ['yes', 'no'])) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Invalid value for is_paid. Use "yes" or "no".'];
+        }
+
+        $sale = Sales::findOne(['invoice_no' => $invoiceNo]);
+        if (!$sale) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Sale not found'];
+        }
+
+        $oldData = $sale->attributes;
+
+        $sale->is_paid    = $isPaid;
+        $sale->updated_by = $updatedBy;
+
+        if (!$sale->save()) {
+            Yii::$app->response->statusCode = 500;
+            return ['error' => 'Failed to update sale'];
+        }
+
+        // ✅ Audit log entry
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity'      => 'sales',
+            'entity_id'   => $sale->id,
+            'action'      => 'set_paid_unpaid',
+            'old_data'    => json_encode($oldData),
+            'new_data'    => json_encode($sale->attributes),
+            'updated_by'  => $updatedBy,
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ])->execute();
+
+        return ['success' => true, 'data' => $sale];
     }
 }

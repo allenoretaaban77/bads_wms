@@ -95,14 +95,14 @@ class ReplenishmentController extends Controller
         }
 
         // 🎯 Filters
-        // $filters = [
-        //     'type' => $request->get('supplier'),
-        // ];
-        // foreach ($filters as $field => $value) {
-        //     if (!empty($value)) {
-        //         $query->andWhere([$field => $value]);
-        //     }
-        // }
+        $filters = [
+            'status' => $request->get('status'),
+        ];
+        foreach ($filters as $field => $value) {
+            if (!empty($value)) {
+                $query->andWhere([$field => $value]);
+            }
+        }
 
         // 📄 Pagination
         $page = (int)$request->get('page', 1);

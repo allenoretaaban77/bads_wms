@@ -108,12 +108,21 @@ class InventoryController extends Controller
             'rack' => $request->get('rack'),
             'shelf' => $request->get('shelf'),
             'box' => $request->get('box'),
-            'status' => $request->get('status'),
+            // 'status' => $request->get('status'),
             'record_status' => $request->get('record_status'),
         ];
         foreach ($filters as $field => $value) {
             if (!empty($value)) {
                 $query->andWhere([$field => $value]);
+            }
+        }
+
+        $filters = [
+            'status' => $request->get('status'),
+        ];
+        foreach ($filters as $field => $value) {
+            if (!empty($value)) {
+                $query->andHaving([$field => $value]);
             }
         }
 

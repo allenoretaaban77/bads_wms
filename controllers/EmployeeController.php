@@ -7,6 +7,7 @@ use yii\rest\Controller;
 use yii\filters\auth\HttpBearerAuth;
 use yii\filters\auth\QueryParamAuth;
 use app\models\Employee;
+use app\models\Employees;
 
 /**
  * Employee API Controller
@@ -156,6 +157,9 @@ class EmployeeController extends Controller
             return ['error' => 'Failed to create employee'];
         }
 
+        $employee->employee_id = $employee->id;
+        $employee->save(false, ['employee_id']);
+
         Yii::$app->response->statusCode = 201;
         return [
             'success' => true,
@@ -272,6 +276,19 @@ class EmployeeController extends Controller
     }
 
     /**
+     * View single item - GET /api/inventory/view?id=123
+     */
+    public function actionView($id)
+    {
+        $item = Employee::findOne($id);
+        if (!$item) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Item not found'];
+        }
+        return ['success' => true, 'data' => $item];
+    }
+
+    /**
      * Update employee - PUT /api/employee/update
      * @return array
      */
@@ -368,5 +385,19 @@ class EmployeeController extends Controller
     {
         return 'xlVMmrXld8JzDGQxw_HZN-I1oU_pX_B0';
         // return Yii::$app->security->generateRandomString(32);
+    }
+
+    public function actionGenerateemployeenumber()
+    {   
+        $prefix = 'EMP';
+        $date = date('y');
+        $count = Employees::find()->orderBy(['id' => SORT_DESC])->limit(1)->one();
+        $lastId = Yii::$app->db->createCommand("SELECT MAX(id) FROM employees")->queryScalar();
+        $lastId = str_pad($lastId + 1, 3, '0', STR_PAD_LEFT);
+
+        return [
+            'success' => true,
+            'trnxno' => $prefix . $date . $lastId,
+        ];
     }
 }

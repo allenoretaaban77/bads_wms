@@ -61,8 +61,10 @@ $config = [
                 'POST,OPTIONS api/employee/register' => 'employee/register',
                 'GET,OPTIONS api/employee/profile' => 'employee/profile',
                 'GET,OPTIONS api/employee/list' => 'employee/list',
+                'GET,OPTIONS api/employee/view' => 'employee/view',
                 'PUT,OPTIONS api/employee/update' => 'employee/update',
                 'DELETE,OPTIONS api/employee/delete' => 'employee/delete',
+                'GET,OPTIONS api/employee/generateemployeenumber' => 'employee/generateemployeenumber',
                 
                 // API routes for Inventory 👇 CHANGED THESE TO INCLUDE OPTIONS
                 'GET,OPTIONS api/inventory/list' => 'inventory/list',
@@ -97,6 +99,8 @@ $config = [
                 'POST,OPTIONS api/sales/create' => 'sales/create',
                 'PUT,OPTIONS api/sales/update' => 'sales/update',
                 'PATCH,OPTIONS api/sales/update' => 'sales/update',
+                'PUT,OPTIONS api/sales/setpaidunpaid' => 'sales/setpaidunpaid',
+                'PATCH,OPTIONS api/sales/setpaidunpaid' => 'sales/setpaidunpaid',
                 'PUT,OPTIONS api/sales/approve' => 'sales/approve',
                 'PATCH,OPTIONS api/sales/approve' => 'sales/approve',
                 'DELETE,OPTIONS api/sales/delete' => 'sales/delete',
@@ -110,7 +114,11 @@ $config = [
                 'POST,OPTIONS api/returns/create' => 'returns/create',
                 'PUT,OPTIONS api/returns/approve' => 'returns/approve',
                 'PATCH,OPTIONS api/returns/approve' => 'returns/approve',
-                'GET,OPTIONS api/replenishment/generatetrnxno' => 'replenishment/generatetrnxno',
+                'GET,OPTIONS api/returns/generatetrnxno' => 'returns/generatetrnxno',
+
+                // API routes for repors
+                'GET,OPTIONS api/reports/list' => 'reports/list',
+                'GET,OPTIONS api/reports/view' => 'reports/view',
             ],
         ],
         'formatter' => [

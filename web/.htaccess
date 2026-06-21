@@ -1,4 +1,16 @@
-RewriteEngine on
-RewriteCond %{REQUEST_FILENAME} !-d
+# RewriteEngine on
+# RewriteCond %{REQUEST_FILENAME} !-d
+# RewriteCond %{REQUEST_FILENAME} !-f
+# RewriteRule . index.php [L]
+
+
+RewriteEngine On
+
+# 1. EXCLUDE the React folder from Yii2's rewrite rules
+RewriteCond %{REQUEST_URI} ^/app [NC]
+RewriteRule ^app/(.*)$ app/$1 [L]
+
+# 2. Standard Yii2 rules for everything else
 RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule . index.php [L]
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.php
