@@ -61,6 +61,7 @@ $config = [
                 'POST,OPTIONS api/employee/register' => 'employee/register',
                 'GET,OPTIONS api/employee/profile' => 'employee/profile',
                 'GET,OPTIONS api/employee/list' => 'employee/list',
+                'GET,OPTIONS api/employee/tablelistsearch' => 'employee/tablelistsearch',
                 'GET,OPTIONS api/employee/view' => 'employee/view',
                 'PUT,OPTIONS api/employee/update' => 'employee/update',
                 'DELETE,OPTIONS api/employee/delete' => 'employee/delete',

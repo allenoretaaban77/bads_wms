@@ -92,6 +92,104 @@ class InventoryController extends Controller
         $search = $request->get('search');
         if (!empty($search)) {
             $query->andFilterWhere(['like', 'product_name', $search])
+                // ->orFilterWhere(['like', 'cost_per_unit', $search])
+                ->orFilterWhere(['like', 'price_per_unit', $search])
+                // ->orFilterWhere(['like', 'total_inventory_cost', $search])
+                // ->orFilterWhere(['like', 'total_inventory_value', $search])
+                ->orFilterWhere(['like', 'total_sold', $search])
+                ->orFilterWhere(['like', 'sku', $search])
+                ->orFilterWhere(['like', 'type', $search]);
+                // ->orFilterWhere(['like', 'status', $search])
+        }
+
+        // 🎯 Filters
+        $filters = [
+            'type' => $request->get('type'),
+            'rack' => $request->get('rack'),
+            'shelf' => $request->get('shelf'),
+            'box' => $request->get('box'),
+            // 'status' => $request->get('status'),
+            'record_status' => $request->get('record_status'),
+        ];
+        foreach ($filters as $field => $value) {
+            if (!empty($value)) {
+                $query->andWhere([$field => $value]);
+            }
+        }
+
+        $filters = [
+            'status' => $request->get('status'),
+        ];
+        foreach ($filters as $field => $value) {
+            if (!empty($value)) {
+                $query->andHaving([$field => $value]);
+            }
+        }
+
+        // 📄 Pagination
+        $page = (int)$request->get('page', 1);
+        $pageSize = (int)$request->get('pageSize', 10);
+        $offset = ($page - 1) * $pageSize;
+
+        // 📊 Sorting (default id ASC)
+        $sortField = $request->get('sort', 'id');
+        $sortOrder = strtolower($request->get('order', 'asc')) === 'desc' ? SORT_DESC : SORT_ASC;
+
+        $allowedSortFields = [
+            'id', 'product_name', 'sku', 'cost_per_unit', 'price_per_unit',
+            'current_qty', 'total_inventory_cost', 'total_inventory_value',
+            'date_created', 'date_updated', 'tae'
+        ];
+        if (in_array($sortField, $allowedSortFields)) {
+            $query->orderBy([$sortField => $sortOrder]);
+        } else {
+            $query->orderBy(['id' => SORT_DESC]);
+        }
+
+        // Execute query
+        $totalCount = $query->count();
+        $items = $query->offset($offset)->limit($pageSize)->asArray()->all();
+
+        return [
+            'success' => true,
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'totalCount' => $totalCount,
+            'totalPages' => ceil($totalCount / $pageSize),
+            'sortField' => $sortField,
+            'sortOrder' => $sortOrder === SORT_ASC ? 'asc' : 'desc',
+            'count' => count($items),
+            'data' => $items,
+        ];
+    }
+
+    public function actionTablelistsearch()
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $query = Inventory::find()
+            ->select([
+                'inventory.*',
+                // 'date_received' => 'b.date_received',
+                'SUM(COALESCE(b.current_qty, 0)) AS current_qty', 
+                'SUM(COALESCE(b.current_qty, 0) * COALESCE(b.cost_per_unit, 0)) AS total_inventory_cost',
+                'SUM(COALESCE(b.current_qty, 0) * COALESCE(inventory.price_per_unit, 0)) AS total_inventory_value',
+                'CASE 
+                    WHEN SUM(COALESCE(b.current_qty, 0)) = 0 THEN "No Stock" 
+                    WHEN SUM(COALESCE(b.current_qty, 0)) < MIN(inventory.reorder_level) THEN "Low Stock" 
+                    ELSE "In Stock" 
+                END AS status'
+            ])
+            ->leftJoin('inventory_batches b', 'inventory.id = b.inventory_id')
+            ->groupBy(['inventory.id']);
+
+        $search = $request->get('search');
+        if (!empty($search)) {
+            $query->andFilterWhere(['like', 'product_name', $search])
                 ->orFilterWhere(['like', 'cost_per_unit', $search])
                 ->orFilterWhere(['like', 'price_per_unit', $search])
                 ->orFilterWhere(['like', 'total_inventory_cost', $search])
