@@ -104,7 +104,7 @@ class InventoryController extends Controller
 
         // 🎯 Filters
         $filters = [
-            'type' => $request->get('type'),
+            'type' => $request->get('type') === 'all' ? '' : $request->get('type'),
             'rack' => $request->get('rack'),
             'shelf' => $request->get('shelf'),
             'box' => $request->get('box'),
@@ -565,7 +565,8 @@ class InventoryController extends Controller
                 'or',
                 ['like', 'i.product_name', $search],
                 ['like', 'i.sku', $search],
-                ['like', 'b.cost_per_unit', $search]
+                ['like', 'b.cost_per_unit', $search],
+                ['like', 'i.price_per_unit', $search]
             ]);
         }
 
@@ -791,7 +792,8 @@ class InventoryController extends Controller
                 'or',
                 ['like', 'i.product_name', $search],
                 ['like', 'i.sku', $search],
-                ['like', 'b.cost_per_unit', $search] // Matches if any underlying batch hits this cost threshold
+                ['like', 'b.cost_per_unit', $search], // Matches if any underlying batch hits this cost threshold,
+                ['like', 'i.price_per_unit', $search]
             ]);
         }
 

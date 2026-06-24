@@ -13,6 +13,7 @@ use yii\web\Response;
 use yii\filters\VerbFilter;
 use yii\db\Expression;
 use app\models\Employee; 
+use app\models\Suppliers; 
 
 class ReplenishmentController extends Controller
 {
@@ -281,8 +282,17 @@ class ReplenishmentController extends Controller
 
         return [
             'success' => true,
-            'data' => $replenishment
+            'data' => $replenishment,
+            'suppliers' => $this->getSuppliers()
         ];
+    }
+
+    private function getSuppliers() 
+    {
+        $query = Suppliers::find();
+        $items = $query->orderBy(['name' => SORT_ASC])->asArray()->all();;
+
+        return $items;
     }
 
     public function actionCreateOld()

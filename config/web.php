@@ -117,9 +117,12 @@ $config = [
                 'PATCH,OPTIONS api/returns/approve' => 'returns/approve',
                 'GET,OPTIONS api/returns/generatetrnxno' => 'returns/generatetrnxno',
 
-                // API routes for repors
+                // API routes for reports
                 'GET,OPTIONS api/reports/list' => 'reports/list',
                 'GET,OPTIONS api/reports/view' => 'reports/view',
+
+                // API routes for suppliers
+                'GET,OPTIONS api/suppliers/list' => 'suppliers/list'
             ],
         ],
         'formatter' => [
