@@ -199,6 +199,7 @@ class SalesController extends Controller
                 'i.tracking_method',
                 'sales_items.inventory_id',
                 'sales_items.price_per_unit AS price',
+                'sales_items.cost_per_unit AS cost',
                 'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold', 
                 'SUM(COALESCE(sales_items.total, 0)) AS total', 
                 'SUM(COALESCE(b.current_qty, 0)) AS current_qty', 

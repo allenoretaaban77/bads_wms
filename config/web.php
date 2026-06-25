@@ -77,6 +77,8 @@ $config = [
                 'POST,OPTIONS api/inventory/create' => 'inventory/create',
                 'PUT,OPTIONS api/inventory/update' => 'inventory/update',
                 'PATCH,OPTIONS api/inventory/update' => 'inventory/update',
+                'PUT,OPTIONS api/inventory/updatecosts' => 'inventory/updatecosts',
+                'PATCH,OPTIONS api/inventory/updatecosts' => 'inventory/updatecosts',
                 'DELETE,OPTIONS api/inventory/delete' => 'inventory/delete',
                 
                 // API routes for Replenishment

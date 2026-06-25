@@ -1072,6 +1072,89 @@ class InventoryController extends Controller
         return ['success' => true, 'data' => $item];
     }
 
+    public function actionUpdatecosts()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+        
+        $request = Yii::$app->request;
+
+        if (!$request->isPost) {
+            throw new BadRequestHttpException('Only POST requests are allowed.');
+        }
+
+        // Retrieve raw JSON body data parsed as an array
+        $params = $request->bodyParams;
+
+        $inventoryId = $params['inventory_id'] ?? null;
+        $items = $params['items'] ?? null;
+
+        if (empty($inventoryId) || !is_array($items)) {
+            return $this->asJson([
+                'success' => false,
+                'message' => 'Invalid payload. "inventory_id" and an array of "items" are required.'
+            ]);
+        }
+
+        $totalUpdatedRows = 0;
+        $processedRecords = [];
+        
+        // Wrap in a transaction to ensure all updates succeed together
+        $transaction = Yii::$app->db->beginTransaction();
+
+        try {
+            foreach ($items as $item) {
+                $newCost = $item['cost_per_unit'] ?? null;
+                $dateReceived = $item['date_received'] ?? null;
+
+                if ($newCost === null || empty($dateReceived)) {
+                    continue; // Skip malformed items
+                }
+
+                // Update rows matching this specific batch date and inventory item
+                $updatedRows = InventoryBatches::updateAll(
+                    ['cost_per_unit' => $newCost],
+                    [
+                        'inventory_id' => $inventoryId,
+                        'date_received' => $dateReceived
+                    ]
+                );
+
+                $totalUpdatedRows += $updatedRows;
+                $processedRecords[] = [
+                    'date_received' => $dateReceived,
+                    'cost_updated_to' => $newCost,
+                    'rows_affected' => $updatedRows
+                ];
+            }
+
+            $transaction->commit();
+
+            return $this->asJson([
+                'success' => true,
+                'message' => "Successfully updated batch costs.",
+                'total_rows_affected' => $totalUpdatedRows,
+                'details' => $processedRecords
+            ]);
+
+            return ['success' => true, 'data' => [
+                'message' => "Successfully updated batch costs.",
+                'total_rows_affected' => $totalUpdatedRows,
+                'details' => $processedRecords
+            ]];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            return $this->asJson([
+                'success' => false,
+                'message' => 'An error occurred during execution. Changes rolled back.',
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
     /**
      * Delete item - DELETE /api/inventory/delete
      */
