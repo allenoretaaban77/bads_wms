@@ -78,7 +78,7 @@ class InventoryController extends Controller
                 'inventory.*',
                 // 'date_received' => 'b.date_received',
                 'SUM(COALESCE(b.current_qty, 0)) AS current_qty', 
-                'SUM(COALESCE(b.current_qty, 0) * COALESCE(b.cost_per_unit, 0)) AS total_inventory_cost',
+                'total_inventory_cost' => 'SUM(COALESCE(b.current_qty, 0) * COALESCE(b.cost_per_unit, 0))',
                 'SUM(COALESCE(b.current_qty, 0) * COALESCE(inventory.price_per_unit, 0)) AS total_inventory_value',
                 'CASE 
                     WHEN SUM(COALESCE(b.current_qty, 0)) = 0 THEN "No Stock" 
@@ -150,8 +150,27 @@ class InventoryController extends Controller
         $totalCount = $query->count();
         $items = $query->offset($offset)->limit($pageSize)->asArray()->all();
 
+        $query_summary = Inventory::find()
+            ->select([
+                // 'SUM(COALESCE(b.current_qty, 0)) AS total_items', 
+                'COUNT(*) AS total_product_count', 
+                'SUM(COALESCE(b.current_qty, 0) * COALESCE(b.cost_per_unit, 0)) AS total_inventory_cost',
+                'SUM(COALESCE(b.current_qty, 0) * COALESCE(inventory.price_per_unit, 0)) AS total_inventory_value',
+                'SUM(CASE WHEN COALESCE(b.current_qty, 0) = 0 THEN 1 ELSE 0 END) AS no_stock',
+                'SUM(CASE WHEN (COALESCE(b.current_qty, 0) < inventory.reorder_level AND COALESCE(b.current_qty, 0) > 0) THEN 1 ELSE 0 END) AS low_stock',
+                'SUM(CASE WHEN (COALESCE(b.current_qty, 0) >= inventory.reorder_level AND COALESCE(b.current_qty, 0) > 0) THEN 1 ELSE 0 END) AS in_stock',
+            ])
+            ->leftJoin('inventory_batches b', 'inventory.id = b.inventory_id');
+        $summary = $query_summary->asArray()->one();
+
         return [
             'success' => true,
+            'totalProductCount' => $summary['total_product_count'],
+            'totalInventoryCost' => $summary['total_inventory_cost'],
+            'totalInventoryValue' => $summary['total_inventory_value'],
+            'totalNoStock' => (float) $summary['no_stock'],
+            'totalLowStock' => (float) $summary['low_stock'],
+            'totalInStock' => (float) $summary['in_stock'],
             'page' => $page,
             'pageSize' => $pageSize,
             'totalCount' => $totalCount,
@@ -772,7 +791,11 @@ class InventoryController extends Controller
                 'i.box',
                 'i.tracking_method',
                 'SUM(COALESCE(b.current_qty, 0)) AS current_qty',        // Combined total stock across all active batches
-                'MAX(COALESCE(b.cost_per_unit, 0.00)) AS cost_per_unit', // Reference baseline cost (Displays highest batch cost)
+                // 'MAX(COALESCE(b.cost_per_unit, 0.00)) AS cost_per_unit', // Reference baseline cost (Displays highest batch cost)
+                '(CASE 
+                    WHEN i.tracking_method = "standard" THEN i.cost_per_unit
+                    ELSE MAX(COALESCE(b.cost_per_unit, 0.00))
+                END) AS cost_per_unit',
                 // Combined global product status
                 '(CASE 
                     WHEN SUM(COALESCE(b.current_qty, 0)) > 0 THEN "In Stock"
@@ -1103,6 +1126,14 @@ class InventoryController extends Controller
             return ['exists' => true];
         } else {
             return ['exists' => false];
+        }
+    }
+
+    public function actionGetsummary()
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
         }
     }
 }

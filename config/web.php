@@ -72,6 +72,7 @@ $config = [
                 'GET,OPTIONS api/inventory/listsearch' => 'inventory/listsearch',
                 'GET,OPTIONS api/inventory/replenishmentlistsearch' => 'inventory/replenishmentlistsearch',
                 'GET,OPTIONS api/inventory/batcheslistsearch' => 'inventory/batcheslistsearch',
+                'GET,OPTIONS api/inventory/getsummary' => 'inventory/getsummary',
                 'POST,OPTIONS api/inventory/checksku' => 'inventory/checksku',
                 'POST,OPTIONS api/inventory/create' => 'inventory/create',
                 'PUT,OPTIONS api/inventory/update' => 'inventory/update',
