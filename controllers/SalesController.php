@@ -348,7 +348,7 @@ class SalesController extends Controller
                 $pricePerUnit = (float)($itemData['price'] ?? 0);
 
                 // Row-level base validations
-                if ($totalQtySold < 0) {
+                if ($totalQtySold <= 0) {
                     $transaction->rollBack();
                     Yii::$app->response->statusCode = 422;
                     return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid quantity: '.$inventory->product_name]]];
@@ -553,7 +553,7 @@ class SalesController extends Controller
                 $pricePerUnit = (float)($itemData['price'] ?? 0);
 
                 // Row-level base validations
-                if ($totalQtySold < 0) {
+                if ($totalQtySold <= 0) {
                     $transaction->rollBack();
                     Yii::$app->response->statusCode = 422;
                     return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid quantity: '.$inventory->product_name]]];
