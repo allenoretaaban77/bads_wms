@@ -10,7 +10,7 @@ use Yii;
  * @property int $id
  * @property int $sales_id
  * @property int $inventory_id
- * @property int $qty_sold
+ * @property float $qty_sold
  * @property float $price_per_unit
  * @property float $cost_per_unit
  * @property float|null $total

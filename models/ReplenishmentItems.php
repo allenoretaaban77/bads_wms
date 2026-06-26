@@ -10,7 +10,7 @@ use Yii;
  * @property int $id
  * @property int $transaction_id
  * @property int $inventory_id
- * @property int $qty_added
+ * @property float $qty_added
  * @property float $cost_per_unit
  * @property float $total
  * @property string|null $record_status
@@ -59,7 +59,7 @@ class ReplenishmentItems extends \yii\db\ActiveRecord
             'id' => 'ID',
             'transaction_id' => 'Transaction ID',
             'inventory_id' => 'Inventory ID',
-            'qty_added' => 'Qty Added',
+            'qty_added' => 'Quantity Added',
             'cost_per_unit' => 'Cost Per Unit',
             'total' => 'Total',
             'record_status' => 'Record Status',

@@ -12,7 +12,7 @@ use Yii;
  * @property int $inventory_id
  * @property int|null $batch_id
  * @property int $sales_item_id
- * @property int $qty_returned
+ * @property float $qty_returned
  * @property float $unit_price
  * @property float|null $total
  * @property string|null $reason

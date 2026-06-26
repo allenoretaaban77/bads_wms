@@ -13,7 +13,7 @@ use Yii;
  * @property float $cost_per_unit
  * @property float $price_per_unit
  * @property int $reorder_level
- * @property int $current_qty_x
+ * @property float|null $current_qty_x
  * @property string $type
  * @property string $rack
  * @property string $shelf
@@ -22,7 +22,7 @@ use Yii;
  * @property string $remarks
  * @property float|null $total_inventory_cost_x
  * @property float|null $total_inventory_value_x
- * @property int|null $total_sold
+ * @property float|null $total_sold
  * @property string $date_created
  * @property string $date_updated
  * @property int|null $added_by
@@ -59,7 +59,7 @@ class Inventory extends \yii\db\ActiveRecord
             [['record_status'], 'default', 'value' => 'active'],
             //[['product_name', 'sku', 'cost_per_unit', 'price_per_unit', 'reorder_level', 'current_qty_x', 'type', 'rack', 'shelf', 'box', 'status_x', 'remarks'], 'required'],
             [['product_name', 'type', 'cost_per_unit', 'price_per_unit', 'reorder_level', 'tracking_method'], 'required'],
-            [['total_sold', 'added_by', 'updated_by'], 'integer'],
+            [['added_by', 'updated_by'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
             [['record_status', 'remarks', 'tracking_method'], 'string'],
             [['product_name', 'hash'], 'string', 'max' => 255],
@@ -67,8 +67,8 @@ class Inventory extends \yii\db\ActiveRecord
             [['type', 'rack', 'shelf', 'box', 'status_x'], 'string', 'max' => 50],
             // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
             [['sku'], 'unique', 'targetClass' => '\app\models\Inventory', 'message' => 'SKU already exists'],
-            [['cost_per_unit', 'price_per_unit'], 'number', 'min' => 0],
-            [['reorder_level', 'current_qty_x'], 'integer', 'min' => 0],
+            [['cost_per_unit', 'price_per_unit', 'total_sold', 'current_qty_x'], 'number', 'min' => 0],
+            [['reorder_level'], 'integer', 'min' => 0],
         ];
     }
 
