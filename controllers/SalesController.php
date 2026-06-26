@@ -556,12 +556,12 @@ class SalesController extends Controller
                 if ($totalQtySold < 1) {
                     $transaction->rollBack();
                     Yii::$app->response->statusCode = 422;
-                    return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid quantity: '.inventory->product_name]]];
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid quantity: '.$inventory->product_name]]];
                 }
                 if ($pricePerUnit <= 0) {
                     $transaction->rollBack();
                     Yii::$app->response->statusCode = 422;
-                    return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid price: '.inventory->product_name]]];
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid price: '.$inventory->product_name]]];
                 }
 
                 // 2. Fork Flow based on Tracking Method (Draft-only behavior)
