@@ -38,8 +38,8 @@ class SalesItems extends \yii\db\ActiveRecord
         return [
             [['sales_id', 'inventory_id', 'qty_sold', 'price_per_unit', 'cost_per_unit'], 'required'],
             [['total'], 'default', 'value' => null],
-            [['sales_id', 'inventory_id', 'qty_sold'], 'integer'],
-            [['price_per_unit', 'total', 'cost_per_unit'], 'number'],
+            [['sales_id', 'inventory_id'], 'integer'],
+            [['price_per_unit', 'total', 'cost_per_unit', 'qty_sold'], 'number'],
             [['inventory_id'], 'exist', 'skipOnError' => true, 'targetClass' => Inventory::class, 'targetAttribute' => ['inventory_id' => 'id']],
             [['sales_id'], 'exist', 'skipOnError' => true, 'targetClass' => Sales::class, 'targetAttribute' => ['sales_id' => 'id']],
         ];

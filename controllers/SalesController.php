@@ -208,6 +208,7 @@ class SalesController extends Controller
             ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
             ->where(['sales_items.sales_id' => $id])
             ->groupBy(['sales_items.inventory_id'])
+            ->orderBy(['sales_items.id' => SORT_ASC])
             ->asArray()
             ->all();
 
@@ -278,6 +279,7 @@ class SalesController extends Controller
                 'i.product_name'
             ])
             ->where(['sales_id' => $id])
+            ->orderBy(['sales_items.id' => SORT_ASC])
             ->asArray()
             ->all();
 
@@ -344,7 +346,7 @@ class SalesController extends Controller
                     return ['error' => 'Validation failed', 'errors' => ['items' => ["Item not found in inventory."]]];
                 }
 
-                $totalQtySold = (int)($itemData['quantity'] ?? 0);
+                $totalQtySold = (float)($itemData['quantity'] ?? 0);
                 $pricePerUnit = (float)($itemData['price'] ?? 0);
 
                 // Row-level base validations
@@ -549,7 +551,7 @@ class SalesController extends Controller
                     return ['error' => 'Validation failed', 'errors' => ['items' => ["Item not found in inventory."]]];
                 }
 
-                $totalQtySold = (int)($itemData['quantity'] ?? 0);
+                $totalQtySold = (float)($itemData['quantity'] ?? 0);
                 $pricePerUnit = (float)($itemData['price'] ?? 0);
 
                 // Row-level base validations

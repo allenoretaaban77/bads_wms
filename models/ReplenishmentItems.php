@@ -42,8 +42,8 @@ class ReplenishmentItems extends \yii\db\ActiveRecord
         return [
             [['transaction_id', 'inventory_id', 'qty_added', 'cost_per_unit'], 'required'],
             [['record_status'], 'default', 'value' => 'active'],
-            [['transaction_id', 'inventory_id', 'qty_added'], 'integer'],
-            [['cost_per_unit'], 'number'],
+            [['transaction_id', 'inventory_id'], 'integer'],
+            [['cost_per_unit', 'qty_added'], 'number'],
             [['inventory_id'], 'exist', 'skipOnError' => true, 'targetClass' => Inventory::class, 'targetAttribute' => ['inventory_id' => 'id']],
             [['record_status'], 'string'],
             // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],

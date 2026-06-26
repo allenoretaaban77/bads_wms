@@ -628,7 +628,7 @@ class ReplenishmentController extends Controller
         // Server-side recalculation of the total amount to guarantee system integrity
         $calculatedAmount = 0.0;
         foreach ($requestData['items'] as $itemData) {
-            $qty = (int)($itemData['quantity'] ?? 0);
+            $qty = (float)($itemData['quantity'] ?? 0);
             $cost = (float)($itemData['cost'] ?? 0);
             if ($qty > 0 && $cost > 0) {
                 $calculatedAmount += ($qty * $cost);
@@ -683,10 +683,10 @@ class ReplenishmentController extends Controller
                     return ['success' => false, 'message' => "Item ID {$invId} not found in master inventory records.", 'errors' => []];
                 }
 
-                $qtyAdded = (int)($itemData['quantity'] ?? 0);
+                $qtyAdded = (float)($itemData['quantity'] ?? 0);
                 $costPerUnit = (float)($itemData['cost'] ?? 0);
 
-                if ($qtyAdded < 1) {
+                if ($qtyAdded <= 0) {
                     $transaction->rollBack();
                     Yii::$app->response->statusCode = 422;
                     return ['success' => false, 'message' => 'Validation failed.', 'errors' => ["quantity_{$inventory->id}" => ['Invalid quantity.']]];
