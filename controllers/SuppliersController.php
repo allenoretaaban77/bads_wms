@@ -61,8 +61,6 @@ class SuppliersController extends Controller
         return true; // allow action to run
     } 
 
-
-
     public function actionList()
     {
         if (Yii::$app->request->method !== 'GET') {
@@ -132,5 +130,42 @@ class SuppliersController extends Controller
             'count' => count($items),
             'data' => $items,
         ];
+    }
+    
+    public function actionDelete()
+    {
+        if (Yii::$app->request->method !== 'DELETE') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $id = Yii::$app->request->getBodyParam('id');
+        $item = Suppliers::findOne($id);
+        $employee_id = Yii::$app->request->getBodyParam('employee_id');
+
+        if (!$item) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Item not found'];
+        }
+
+        $oldData = $item->attributes; // Capture data before deletion
+
+        if (!$item->delete()) {
+            Yii::$app->response->statusCode = 500;
+            return ['error' => 'Failed to delete supplier record'];
+        }    
+
+        // ✅ Insert into audit log after successful delete
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity' => 'supplier',
+            'entity_id' => $id,
+            'action' => 'delete',
+            'old_data' => json_encode($oldData),
+            'new_data' => null,
+            'updated_by' => $employee_id,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ])->execute();
+
+        return ['success' => true, 'message' => 'Supplier record deleted successfully'];
     }
 }

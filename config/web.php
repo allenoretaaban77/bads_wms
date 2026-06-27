@@ -125,7 +125,8 @@ $config = [
                 'GET,OPTIONS api/reports/view' => 'reports/view',
 
                 // API routes for suppliers
-                'GET,OPTIONS api/suppliers/list' => 'suppliers/list'
+                'GET,OPTIONS api/suppliers/list' => 'suppliers/list',
+                'DELETE,OPTIONS api/suppliers/delete' => 'suppliers/delete',
             ],
         ],
         'formatter' => [
