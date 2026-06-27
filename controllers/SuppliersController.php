@@ -131,6 +131,16 @@ class SuppliersController extends Controller
             'data' => $items,
         ];
     }
+
+    public function actionView($id)
+    {
+        $item = Suppliers::findOne($id);
+        if (!$item) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Item not found'];
+        }
+        return ['success' => true, 'data' => $item];
+    }
     
     public function actionDelete()
     {

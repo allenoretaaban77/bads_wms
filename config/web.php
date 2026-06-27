@@ -127,6 +127,7 @@ $config = [
                 // API routes for suppliers
                 'GET,OPTIONS api/suppliers/list' => 'suppliers/list',
                 'DELETE,OPTIONS api/suppliers/delete' => 'suppliers/delete',
+                'GET,OPTIONS api/suppliers/view' => 'suppliers/view',
             ],
         ],
         'formatter' => [
