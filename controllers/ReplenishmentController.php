@@ -283,11 +283,11 @@ class ReplenishmentController extends Controller
         return [
             'success' => true,
             'data' => $replenishment,
-            'suppliers' => $this->getSuppliers()
+            'suppliers' => $this->actionGetsuppliers()
         ];
     }
 
-    private function getSuppliers() 
+    private function actionGetsuppliers() 
     {
         $query = Suppliers::find();
         $items = $query->orderBy(['name' => SORT_ASC])->asArray()->all();;
@@ -849,6 +849,11 @@ class ReplenishmentController extends Controller
 
     public function actionGeneratetrnxno()
     {   
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+        
         $prefix = 'RPL';
         $date = date('ymd');
         $count = Replenishment::find()->orderBy(['id' => SORT_DESC])->limit(1)->one();

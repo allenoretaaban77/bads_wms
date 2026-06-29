@@ -141,6 +141,87 @@ class SuppliersController extends Controller
         }
         return ['success' => true, 'data' => $item];
     }
+
+    public function actionCreate()
+    {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $supplier = new Suppliers();
+        $supplier->load(Yii::$app->request->post(), '');
+
+        // Automatically assign audit trail fields if passed via current user session (optional clean-up)
+        // $supplier->created_by = Yii::$app->user->id; 
+
+        if (!$supplier->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $supplier->errors];
+        }
+
+        $supplier->date_created = date('Y-m-d H:i:s');
+        if (!$supplier->save()) {
+            Yii::$app->response->statusCode = 500;
+            return ['error' => 'Failed to save supplier'];
+        }
+
+        // ✅ Insert into audit log after successful creation
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity' => 'suppliers',
+            'entity_id' => $supplier->id,
+            'action' => 'create',
+            'new_data' => json_encode($supplier->attributes),
+            'updated_by' => $supplier->created_by, // Tracks creator based on schema
+            'updated_at' => date('Y-m-d H:i:s'),
+        ])->execute();
+
+        return ['success' => true, 'data' => $supplier];
+    }
+
+
+    public function actionUpdate()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $id = Yii::$app->request->getBodyParam('id');
+        $supplier = Suppliers::findOne($id);
+        if (!$supplier) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Supplier not found'];
+        }
+
+        $oldData = $supplier->attributes; // Capture old values before update
+
+        $supplier->load(Yii::$app->request->post(), '');
+
+        if (!$supplier->validate()) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => $supplier->errors];
+        }
+
+        $supplier->date_updated = date('Y-m-d H:i:s');
+        if (!$supplier->save()) {
+            Yii::$app->response->statusCode = 500;
+            return ['error' => 'Failed to save item'];
+        }
+
+        // ✅ Insert into audit log after successful update
+        Yii::$app->db->createCommand()->insert('audit_log', [
+            'entity' => 'suppliers',
+            'entity_id' => $supplier->id,
+            'action' => 'update',
+            'old_data' => json_encode($oldData),
+            'new_data' => json_encode($supplier->attributes),
+            'updated_by' => $supplier->updated_by,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ])->execute();
+
+        return ['success' => true, 'data' => $supplier];
+    }
     
     public function actionDelete()
     {

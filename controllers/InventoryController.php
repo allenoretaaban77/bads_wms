@@ -7,6 +7,7 @@ use yii\rest\Controller;
 use yii\filters\auth\HttpBearerAuth;
 use app\models\Inventory;
 use app\models\Employee; 
+use app\models\InventoryBatches;
 
 /**
  * Inventory API Controller
@@ -1217,6 +1218,115 @@ class InventoryController extends Controller
         if (Yii::$app->request->method !== 'GET') {
             Yii::$app->response->statusCode = 405;
             return ['error' => 'Method not allowed'];
+        }
+    }
+
+
+    public function actionUpdatebatchcostsOld()
+    {
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $inventory_id = Yii::$app->request->post('inventory_id');
+        $items = Yii::$app->request->post('items');
+        if (empty($items)) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Empty items.'];
+        }
+ 
+        $transaction = Yii::$app->db->beginTransaction();
+        foreach($items as $index => $item) {
+            $inventory = Inventory::findOne($item['inventory_id']);
+            if (!$inventory) {
+                Yii::$app->response->statusCode = 404;
+                return ['error' => 'Item not found'];
+            }
+
+            $batch = InventoryBatches::findOne($item['id']);
+            if (!$batch) {
+                Yii::$app->response->statusCode = 404;
+                return ['error' => 'Batch Item not found'];
+            }
+
+            $batch->load(Yii::$app->request->post(), '');
+
+            if (!$batch->save()) {
+                $transaction->rollBack();    
+                Yii::$app->response->statusCode = 500;
+                return ['error' => 'Failed to save item'];
+            }
+        }
+
+        $transaction->commit();
+        return [
+            'success' => true,
+            'message' => 'Batch costs updated successfully.',
+            'id' => $inventory_id
+        ];
+    }
+
+    public function actionUpdatebatchcosts()
+    {
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $inventory_id = Yii::$app->request->post('inventory_id');
+        $items = Yii::$app->request->post('items');
+
+        if (empty($items) || !is_array($items)) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Empty or invalid items payload.'];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        
+        try {
+            foreach ($items as $index => $item) {
+                if (!isset($item['inventory_id']) || !Inventory::find()->where(['id' => $item['inventory_id']])->exists()) {
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => "Inventory not found for item at index {$index}"];
+                }
+
+                $batch = InventoryBatches::findOne($item['id'] ?? null);
+                if (!$batch) {
+                    Yii::$app->response->statusCode = 404;
+                    return ['error' => "Batch Item not found for ID: " . ($item['id'] ?? 'null')];
+                }
+
+                if ($batch->load($item, '')) {
+                    if (!$batch->save()) {
+                        $transaction->rollBack();    
+                        Yii::$app->response->statusCode = 422; 
+                        return [
+                            'error' => "Failed to save item at index {$index}",
+                            'validation_errors' => $batch->getErrors()
+                        ];
+                    }
+                } else {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 400;
+                    return ['error' => "Failed to load data into batch model at index {$index}"];
+                }
+            }
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Batch costs updated successfully.',
+                'id' => $inventory_id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return ['error' => 'An unexpected error occurred.', 'details' => $e->getMessage()];
         }
     }
 }
