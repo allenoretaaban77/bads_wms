@@ -200,14 +200,17 @@ class SalesController extends Controller
                 'sales_items.inventory_id',
                 'sales_items.price_per_unit AS price',
                 'sales_items.cost_per_unit AS cost',
-                'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold', 
-                'SUM(COALESCE(sales_items.total, 0)) AS total', 
-                'SUM(COALESCE(b.current_qty, 0)) AS current_qty', 
+                'sales_items.qty_sold AS qty_sold',
+                'sales_items.total AS total',
+                'b.current_qty AS current_qty',
+                // 'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold', 
+                // 'SUM(COALESCE(sales_items.total, 0)) AS total', 
+                // 'SUM(COALESCE(b.current_qty, 0)) AS current_qty', 
             ])
             ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
             ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
             ->where(['sales_items.sales_id' => $id])
-            ->groupBy(['sales_items.inventory_id'])
+            // ->groupBy(['sales_items.inventory_id'])
             ->orderBy(['sales_items.id' => SORT_ASC])
             ->asArray()
             ->all();
@@ -271,13 +274,15 @@ class SalesController extends Controller
                 'reorder_level' => 'i.reorder_level',
                 'cost_per_unit' => 'i.cost_per_unit',
                 'sku' => 'i.sku',
-                'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold',
-                'SUM(COALESCE(sales_items.total, 0)) AS total',  
+                'sales_items.qty_sold AS qty_sold',
+                'sales_items.total AS total',
+                // 'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold',
+                // 'SUM(COALESCE(sales_items.total, 0)) AS total',  
             ])
             ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
-            ->groupBy([
-                'i.product_name'
-            ])
+            // ->groupBy([
+            //     'i.product_name'
+            // ])
             ->where(['sales_id' => $id])
             ->orderBy(['sales_items.id' => SORT_ASC])
             ->asArray()
