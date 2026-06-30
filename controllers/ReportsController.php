@@ -177,7 +177,154 @@ class ReportsController extends Controller
         ];
     }
 
-    public function actionList() 
+    public function actionUpdatereport() 
+    {
+        // 1. Force JSON response format (Standard practice for API endpoints in Yii2)
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $date = Yii::$app->request->getBodyParam('date');
+        if (!$date) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Date parameter is required'];
+        }
+
+        // Start a transaction to ensure both inserts happen together safely
+        $transaction = Yii::$app->db->beginTransaction();
+
+        try {
+            // --- QUERY 1: Insert itemized inventory breakdown ---
+            // Note: Using UNION ALL to combine sales and returns properly if uncommented
+            $sqlInventoryBreakdown = "
+                INSERT INTO daily_financial_snapshots (report_date, inventory_id, puhunan, tubo, total_sales)
+                SELECT 
+                    :target_date AS report_date,
+                    sub.inventory_id,
+                    SUM(sub.item_puhunan) AS puhunan,
+                    SUM(sub.item_total_sales - sub.item_puhunan) AS tubo,
+                    SUM(sub.item_total_sales) AS total_sales
+                FROM (
+                    SELECT 
+                        si.inventory_id,
+                        SUM(si.qty_sold * si.cost_per_unit) AS item_puhunan,
+                        SUM(si.total) AS item_total_sales
+                    FROM sales s
+                    JOIN sales_items si ON s.id = si.sales_id
+                    WHERE DATE(s.date_sold) = :target_date 
+                      AND s.status = 'approved' AND s.is_paid = 'yes'
+                    GROUP BY si.inventory_id
+
+                    /* UNION ALL
+                    SELECT 
+                        ri.inventory_id,
+                        SUM(ri.qty_returned * si_orig.cost_per_unit) * -1 AS item_puhunan,
+                        SUM(ri.total) * -1 AS item_total_sales
+                    FROM `returns` r
+                    JOIN returns_items ri ON r.id = ri.return_id
+                    JOIN sales_items si_orig ON ri.sales_item_id = si_orig.id
+                    WHERE DATE(r.date_received) = :target_date 
+                      AND r.status = 'approved' AND r.record_status = 'active'
+                      AND ri.record_status = 'active'
+                    GROUP BY ri.inventory_id
+                    */
+                ) sub
+                GROUP BY sub.inventory_id
+                ON DUPLICATE KEY UPDATE 
+                    puhunan = VALUES(puhunan), tubo = VALUES(tubo), total_sales = VALUES(total_sales);
+            ";
+
+            $rowsAffected = Yii::$app->db->createCommand($sqlInventoryBreakdown)
+                ->bindValue(':target_date', $date)
+                ->execute(); // Use execute() for INSERT/UPDATE statements
+
+            // --- QUERY 2: Sync the GLOBAL total store row (inventory_id = 0) ---
+            $sqlGlobalTotal = "
+                INSERT INTO daily_financial_snapshots (report_date, inventory_id, puhunan, tubo, total_sales)
+                SELECT 
+                    report_date,
+                    0 AS inventory_id,
+                    SUM(puhunan) AS puhunan,
+                    SUM(tubo) AS tubo,
+                    SUM(total_sales) AS total_sales
+                FROM daily_financial_snapshots
+                WHERE report_date = :target_date AND inventory_id > 0
+                GROUP BY report_date
+                ON DUPLICATE KEY UPDATE 
+                    puhunan = VALUES(puhunan), tubo = VALUES(tubo), total_sales = VALUES(total_sales);
+            ";
+
+            Yii::$app->db->createCommand($sqlGlobalTotal)
+                ->bindValue(':target_date', $date)
+                ->execute();
+
+            // Commit changes if everything went well
+            $transaction->commit();
+
+            return [
+                'success' => true,
+                'rows_affected' => $rowsAffected,
+            ];
+
+        } catch (\Exception $e) {
+            // Rollback database if anything fails
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'error' => 'Failed to update snapshot: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    public function actionList() {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $tableHeader = [
+            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
+            ["title"=>"Date","name"=>"date","align"=>"left"],
+            ["title"=>"Puhunan","name"=>"puhunan","align"=>"right"],
+            ["title"=>"Tubo","name"=>"tubo","align"=>"right"],
+            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right"],
+            ["title"=>"Action","name"=>"action","default"=>1],
+        ];
+
+        $sql = "
+            SELECT 
+                s.date_sold AS date, 
+                COALESCE(dfi.puhunan, 0) AS puhunan,
+                COALESCE(dfi.tubo, 0) AS tubo,
+                COALESCE(dfi.total_sales, 0) AS total_sales
+            FROM sales AS s
+            LEFT JOIN daily_financial_snapshots AS dfi
+                ON s.date_sold = dfi.report_date 
+                AND dfi.inventory_id = 0 
+            GROUP BY 
+                s.date_sold, 
+                dfi.puhunan, 
+                dfi.tubo,
+                dfi.total_sales 
+            ORDER BY date DESC;
+        ";
+
+        $data = Yii::$app->db->createCommand($sql)
+            ->queryAll();
+
+        return [
+            'success' => true,
+            'count' => count($data),
+            'data' => $data,
+            'headers' => json_encode($tableHeader)
+        ];
+    }
+
+    public function actionListOld() 
     {
         $sql = "
             SELECT 

@@ -179,7 +179,6 @@ class SuppliersController extends Controller
         return ['success' => true, 'data' => $supplier];
     }
 
-
     public function actionUpdate()
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
