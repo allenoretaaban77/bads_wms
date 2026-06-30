@@ -378,7 +378,7 @@ class SalesController extends Controller
                     }
 
                     // Verify sum of allocations matches frontend totals
-                    $sumAllocated = array_sum(array_column($allocatedBatches, 'quantity_out'));
+                    $sumAllocated = (float)array_sum(array_column($allocatedBatches, 'quantity_out'));
                     if ($sumAllocated !== $totalQtySold) {
                         $transaction->rollBack();
                         Yii::$app->response->statusCode = 422;
@@ -582,7 +582,7 @@ class SalesController extends Controller
                     }
 
                     // Verify sum of allocations matches frontend totals
-                    $sumAllocated = array_sum(array_column($allocatedBatches, 'quantity_out'));
+                    $sumAllocated = (float) array_sum(array_column($allocatedBatches, 'quantity_out'));
                     if ($sumAllocated !== $totalQtySold) {
                         $transaction->rollBack();
                         Yii::$app->response->statusCode = 422;
