@@ -447,6 +447,7 @@ class ReplenishmentController extends Controller
         $replenishment->date_received = $requestData['date_received'] ?? date('Y-m-d');
         $replenishment->amount = $calculatedAmount; // Safe server-calculated total
         $replenishment->remarks = $requestData['remarks'] ?? null;
+        $replenishment->record_count = $requestData['record_count'] ?? 0;
         $replenishment->date_created = date('Y-m-d H:i:s');
         $replenishment->added_by = Yii::$app->user->id ?? null; // Secure server-side user tracking
         $replenishment->status = $requestData['status'] ?? 'draft';

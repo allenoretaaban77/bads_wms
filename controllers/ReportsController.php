@@ -65,7 +65,6 @@ class ReportsController extends Controller
         return true; // allow action to run
     } 
 
-
     /**
      * GET /report/daily-itemized
      * Optional Query Params: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
@@ -197,44 +196,95 @@ class ReportsController extends Controller
         $transaction = Yii::$app->db->beginTransaction();
 
         try {
+
+            $sqlDelete = "DELETE FROM daily_financial_snapshots WHERE report_date = :target_date";
+            Yii::$app->db->createCommand($sqlDelete)
+                ->bindValue(':target_date', $date)
+                ->execute();
+
+            $maxId = Yii::$app->db->createCommand("SELECT MAX(id) FROM daily_financial_snapshots")->queryScalar();
+            $nextId = $maxId ? ($maxId + 1) : 1;
+            Yii::$app->db->createCommand("ALTER TABLE daily_financial_snapshots AUTO_INCREMENT = :next_id")
+                ->bindValue(':next_id', $nextId)
+                ->execute();
+
             // --- QUERY 1: Insert itemized inventory breakdown ---
             // Note: Using UNION ALL to combine sales and returns properly if uncommented
             $sqlInventoryBreakdown = "
-                INSERT INTO daily_financial_snapshots (report_date, inventory_id, puhunan, tubo, total_sales)
+
+                INSERT INTO daily_financial_snapshots (report_date, inventory_id, source_type, source_item_id, puhunan, tubo, total_sales)
                 SELECT 
                     :target_date AS report_date,
-                    sub.inventory_id,
-                    SUM(sub.item_puhunan) AS puhunan,
-                    SUM(sub.item_total_sales - sub.item_puhunan) AS tubo,
-                    SUM(sub.item_total_sales) AS total_sales
-                FROM (
-                    SELECT 
-                        si.inventory_id,
-                        SUM(si.qty_sold * si.cost_per_unit) AS item_puhunan,
-                        SUM(si.total) AS item_total_sales
-                    FROM sales s
-                    JOIN sales_items si ON s.id = si.sales_id
-                    WHERE DATE(s.date_sold) = :target_date 
-                      AND s.status = 'approved' AND s.is_paid = 'yes'
-                    GROUP BY si.inventory_id
+                    si.inventory_id,
+                    'sale' AS source_type,
+                    si.id AS source_item_id,
+                    (si.qty_sold * si.cost_per_unit) AS puhunan,
+                    (si.total - (si.qty_sold * si.cost_per_unit)) AS tubo,
+                    si.total AS total_sales
+                FROM sales s
+                JOIN sales_items si ON s.id = si.sales_id
+                WHERE DATE(s.date_sold) = :target_date 
+                  AND s.status = 'approved' AND s.is_paid = 'yes'
+                ORDER BY si.id ASC
 
-                    /* UNION ALL
-                    SELECT 
-                        ri.inventory_id,
-                        SUM(ri.qty_returned * si_orig.cost_per_unit) * -1 AS item_puhunan,
-                        SUM(ri.total) * -1 AS item_total_sales
-                    FROM `returns` r
-                    JOIN returns_items ri ON r.id = ri.return_id
-                    JOIN sales_items si_orig ON ri.sales_item_id = si_orig.id
-                    WHERE DATE(r.date_received) = :target_date 
-                      AND r.status = 'approved' AND r.record_status = 'active'
-                      AND ri.record_status = 'active'
-                    GROUP BY ri.inventory_id
-                    */
-                ) sub
-                GROUP BY sub.inventory_id
+                -- UNION ALL
+
+                -- SELECT 
+                --     :target_date AS report_date,
+                --     ri.inventory_id,
+                --     'return' AS source_type,
+                --     ri.id AS source_item_id,
+                --     (ri.qty_returned * si_orig.cost_per_unit) * -1 AS puhunan,
+                --     ((ri.total) * -1) - ((ri.qty_returned * si_orig.cost_per_unit) * -1) AS tubo,
+                --     (ri.total) * -1 AS total_sales
+                -- FROM `returns` r
+                -- JOIN returns_items ri ON r.id = ri.return_id
+                -- JOIN sales_items si_orig ON ri.sales_item_id = si_orig.id
+                -- WHERE DATE(r.date_received) = :target_date 
+                --   AND r.status = 'approved' AND r.record_status = 'active'
+                --   AND ri.record_status = 'active'
+
                 ON DUPLICATE KEY UPDATE 
-                    puhunan = VALUES(puhunan), tubo = VALUES(tubo), total_sales = VALUES(total_sales);
+                    puhunan = VALUES(puhunan), 
+                    tubo = VALUES(tubo), 
+                    total_sales = VALUES(total_sales);
+
+                -- INSERT INTO daily_financial_snapshots (report_date, inventory_id, puhunan, tubo, total_sales)
+                -- SELECT 
+                --     :target_date AS report_date,
+                --     sub.inventory_id,
+                --     SUM(sub.item_puhunan) AS puhunan,
+                --     SUM(sub.item_total_sales - sub.item_puhunan) AS tubo,
+                --     SUM(sub.item_total_sales) AS total_sales
+                -- FROM (
+                --     SELECT 
+                --         si.inventory_id,
+                --         SUM(si.qty_sold * si.cost_per_unit) AS item_puhunan,
+                --         SUM(si.total) AS item_total_sales
+                --     FROM sales s
+                --     JOIN sales_items si ON s.id = si.sales_id
+                --     WHERE DATE(s.date_sold) = :target_date 
+                --       AND s.status = 'approved' AND s.is_paid = 'yes'
+                --     GROUP BY si.inventory_id
+                --     -- ORDER BY si.id ASC
+
+                --     /* UNION ALL
+                --     SELECT 
+                --         ri.inventory_id,
+                --         SUM(ri.qty_returned * si_orig.cost_per_unit) * -1 AS item_puhunan,
+                --         SUM(ri.total) * -1 AS item_total_sales
+                --     FROM `returns` r
+                --     JOIN returns_items ri ON r.id = ri.return_id
+                --     JOIN sales_items si_orig ON ri.sales_item_id = si_orig.id
+                --     WHERE DATE(r.date_received) = :target_date 
+                --       AND r.status = 'approved' AND r.record_status = 'active'
+                --       AND ri.record_status = 'active'
+                --     GROUP BY ri.inventory_id
+                --     */
+                -- ) sub
+                -- GROUP BY sub.inventory_id
+                -- ON DUPLICATE KEY UPDATE 
+                --     puhunan = VALUES(puhunan), tubo = VALUES(tubo), total_sales = VALUES(total_sales);
             ";
 
             $rowsAffected = Yii::$app->db->createCommand($sqlInventoryBreakdown)
@@ -280,7 +330,8 @@ class ReportsController extends Controller
         }
     }
 
-    public function actionList() {
+    public function actionList() 
+    {
         if (Yii::$app->request->method !== 'GET') {
             Yii::$app->response->statusCode = 405;
             return ['error' => 'Method not allowed'];
@@ -324,94 +375,203 @@ class ReportsController extends Controller
         ];
     }
 
-    public function actionListOld() 
+    public function actionListitems() 
     {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $date = Yii::$app->request->getBodyParam('date');
+        if (!$date) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Date parameter is required'];
+        }
+
         $sql = "
             SELECT 
-                d.report_date AS `date`,
-                
-                -- Revenue Metrics
-                COALESCE(s.gross_sales, 0) AS `gross_sales`,
-                COALESCE(r.total_returns, 0) AS `returns_refunds`,
-                (COALESCE(s.gross_sales, 0) - COALESCE(r.total_returns, 0)) AS `net_sales`,
-                
-                -- Expense Metric 1: Cost of Goods Sold
-                COALESCE(s.total_cogs, 0) AS `cogs`,
-                
-                -- Expense Metric 2: Cash Capital Outflow
-                COALESCE(rep.replenishment_spend, 0) AS `Supplier Replenishment Spend`,
-                
-                -- Net Profit (Net Sales - COGS)
-                ((COALESCE(s.gross_sales, 0) - COALESCE(r.total_returns, 0)) - COALESCE(s.total_cogs, 0)) AS `net_profit`,
-                
-                -- Net Profit Margin %
-                IF((COALESCE(s.gross_sales, 0) - COALESCE(r.total_returns, 0)) > 0,
-                    ROUND((((COALESCE(s.gross_sales, 0) - COALESCE(r.total_returns, 0)) - COALESCE(s.total_cogs, 0)) / (COALESCE(s.gross_sales, 0) - COALESCE(r.total_returns, 0))) * 100, 2),
-                    0
-                ) AS `Net Profit Margin (%)`
-
-            FROM (
-                -- Step 1: Create a master timeline matching all subquery filters exactly
-                SELECT DATE(date_sold) AS report_date FROM sales WHERE status = 'approved' AND record_status = 'active' AND is_paid = 'yes'
-                UNION
-                SELECT DATE(date_received) AS report_date FROM replenishment WHERE status = 'approved' AND record_status = 'active'
-                UNION
-                SELECT DATE(date_received) AS report_date FROM `returns` WHERE status = 'approved' AND record_status = 'active'
-            ) d
-
-            -- Step 2: Aggregate Sales and calculate COGS safely from sales_items
-            LEFT JOIN (
-                SELECT 
-                    DATE(sales.date_sold) AS report_date,
-                    SUM(sales.amount) AS gross_sales,
-                    SUM(items.cogs) AS total_cogs
-                FROM sales
-                LEFT JOIN (
-                    SELECT sales_id, SUM(qty_sold * cost_per_unit) AS cogs
-                    FROM sales_items
-                    WHERE record_status = 'active'
-                    GROUP BY sales_id
-                ) items ON sales.id = items.sales_id
-                WHERE sales.status = 'approved' AND sales.record_status = 'active' AND sales.is_paid = 'yes'
-                GROUP BY DATE(sales.date_sold)
-            ) s ON d.report_date = s.report_date
-
-            -- Step 3: Aggregate Customer Returns
-            LEFT JOIN (
-                SELECT 
-                    DATE(date_received) AS report_date,
-                    SUM(amount) AS total_returns
-                FROM `returns`
-                WHERE status = 'approved' AND record_status = 'active'
-                GROUP BY DATE(date_received)
-            ) r ON d.report_date = r.report_date
-
-            -- Step 4: Aggregate Supplier Replenishments
-            LEFT JOIN (
-                SELECT 
-                    DATE(date_received) AS report_date,
-                    SUM(amount) AS replenishment_spend
-                FROM replenishment
-                WHERE status = 'approved' AND record_status = 'active'
-                GROUP BY DATE(date_received)
-            ) rep ON d.report_date = rep.report_date
-
-            ORDER BY d.report_date DESC;
+                i.sku AS sku,
+                i.product_name AS product_name,
+                dfi.report_date AS date, 
+                s.invoice_no,
+                si.qty_sold,
+                si.cost_per_unit,
+                si.price_per_unit,
+                COALESCE(dfi.puhunan, 0) AS puhunan,
+                COALESCE(dfi.tubo, 0) AS tubo,
+                COALESCE(dfi.total_sales, 0) AS total_sales
+            FROM daily_financial_snapshots AS dfi
+            LEFT JOIN inventory AS i
+                ON i.id = dfi.inventory_id
+            LEFT JOIN sales_items as si
+                ON si.id = dfi.source_item_id
+            LEFT JOIN sales as s
+                ON si.sales_id = s.id
+            WHERE dfi.inventory_id != 0 AND dfi.report_date = '$date'
+            -- GROUP BY 
+            --     s.date_sold, 
+            --     dfi.puhunan, 
+            --     dfi.tubo,
+            --     dfi.total_sales 
+            ORDER BY dfi.source_item_id ASC;
         ";
 
         $data = Yii::$app->db->createCommand($sql)
-            // ->bindValue(':start_date', $startDate)
-            // ->bindValue(':end_date', $endDate)
+            ->queryAll();
+
+        $totalPuhunan = 0;
+        $totalTubo = 0;
+        $totalSales = 0;
+        foreach ($data as $item) {
+            $totalPuhunan += (float)$item['puhunan'];
+            $totalTubo += (float)$item['tubo'];
+            $totalSales += (float)$item['total_sales'];
+        }
+
+        return [
+            'success' => true,
+            'report_date' => $date,
+            'count' => count($data),
+            'total_puhunan' => $totalPuhunan,
+            'total_tubo' => $totalTubo,
+            'total_sales' => $totalSales,
+            'items' => $data,
+        ];
+    }
+
+    public function actionGetdailystockins() 
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $tableHeader = [
+            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
+            ["title"=>"Report Date","name"=>"date","align"=>"left"],
+            ["title"=>"Total Purchase Cost","name"=>"total_purchase_cost","align"=>"right","class"=>"w-40"],
+            ["title"=>"Record Count","name"=>"record_count","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Quantity","name"=>"total_quantity","align"=>"right","class"=>"w-28"],
+            ["title"=>"Action","name"=>"action","default"=>1],
+        ];
+
+        $sql = "
+            SELECT 
+                r.date_received AS date,
+                SUM(ri.total) AS total_purchase_cost,
+                COUNT(*) AS record_count,
+                SUM(ri.qty_added) AS total_quantity
+            FROM replenishment AS r
+            LEFT JOIN replenishment_items AS ri
+            ON r.id = ri.transaction_id
+            GROUP BY r.date_received
+            ORDER BY r.date_received DESC;
+        ";
+
+        $data = Yii::$app->db->createCommand($sql)
             ->queryAll();
 
         return [
             'success' => true,
-            // 'filters' => [
-                // 'start_date' => $startDate,
-                // 'end_date' => $endDate,
-            // ],
             'count' => count($data),
-            'data' => $data
+            'data' => $data,
+            'headers' => json_encode($tableHeader)
         ];
+    }
+
+    public function actionGetdailystockinitems() 
+    {
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $date = Yii::$app->request->getBodyParam('date');
+        if (!$date) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Date parameter is required'];
+        }
+
+        $sql = "
+            SELECT
+                i.sku,
+                i.product_name,
+                ri.qty_added AS quantity,
+                ri.cost_per_unit,
+                ri.total AS total_purchase_cost,
+                r.date_received AS date_received,
+                r.supplier AS supplier,
+                r.reference_no AS reference_no
+            FROM inventory AS i
+            LEFT JOIN replenishment_items AS ri
+            ON i.id = ri.inventory_id
+            LEFT JOIN replenishment AS r
+            ON r.id = ri.transaction_id
+            WHERE r.date_received = '$date';
+        ";
+
+        $data = Yii::$app->db->createCommand($sql)
+            ->queryAll();
+
+        $total_purchase_cost = 0;
+        $total_quantity = 0;
+        foreach ($data as $item) {
+            $total_purchase_cost += (float)$item['total_purchase_cost'];
+            $total_quantity += (float)$item['quantity'];
+        }
+
+        return [
+            'success' => true,
+            'report_date' => $date,
+            'count' => count($data),
+            'total_purchase_cost' => $total_purchase_cost,
+            'total_quantity' => $total_quantity,
+            'items' => $data,
+        ];
+    }
+
+    public function actionGetmonthlyreports()
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $tableHeader = [
+            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
+            ["title"=>"Date","name"=>"date","align"=>"left"],
+            ["title"=>"Puhunan","name"=>"puhunan","align"=>"right","class"=>"w-40"],
+            ["title"=>"Tubo","name"=>"tubo","align"=>"right","class"=>"w-40"],
+            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right","class"=>"w-40"],
+            ["title"=>"Action","name"=>"action","default"=>1],
+        ];
+
+        $sql = "
+            SELECT 
+                DATE_FORMAT(s.date_sold, '%Y-%m') AS month, 
+                SUM(COALESCE(dfi.puhunan, 0)) AS total_puhunan,
+                SUM(COALESCE(dfi.tubo, 0)) AS total_tubo,
+                SUM(COALESCE(dfi.total_sales, 0)) AS total_sales
+            FROM sales AS s
+            LEFT JOIN daily_financial_snapshots AS dfi
+                -- Using DATE() strips the time from timestamp so it matches the snapshot date
+                ON DATE(s.date_sold) = dfi.report_date  
+                AND dfi.inventory_id = 0 
+            WHERE s.status = 'approved' -- Optional: filters out inactive sales if needed
+            GROUP BY 
+                DATE_FORMAT(s.date_sold, '%Y-%m')
+            ORDER BY 
+                month DESC;
+        ";
+
+        $data = Yii::$app->db->createCommand($sql)
+            ->queryAll();
+
+        return [
+            'success' => true,
+            'count' => count($data),
+            'data' => $data,
+            'headers' => json_encode($tableHeader)
+        ];        
     }
 }

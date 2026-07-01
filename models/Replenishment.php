@@ -13,6 +13,7 @@ use Yii;
  * @property string $date_received
  * @property float $amount
  * @property string $remarks
+ * @property int $record_count
  * @property string $date_created
  * @property string $date_updated
  * @property int|null $added_by
@@ -51,7 +52,7 @@ class Replenishment extends \yii\db\ActiveRecord
             [['record_status', 'remarks', 'status'], 'string'],
             [['supplier', 'hash'], 'string', 'max' => 255],
             [['reference_no'], 'string', 'max' => 100],
-            [['added_by', 'updated_by'], 'integer'],
+            [['added_by', 'updated_by', 'record_count'], 'integer'],
             // ['record_status', 'in', 'range' => array_keys(self::optsRecordStatus())],
             [['reference_no'], 'unique', 'targetClass' => '\app\models\Replenishment', 'message' => 'Reference number already exists'],
         ];
@@ -69,6 +70,7 @@ class Replenishment extends \yii\db\ActiveRecord
             'date_received' => 'Date Received',
             'amount' => 'Amount',
             'remarks' => 'Remarks',
+            'record_count' => 'Record Count',
             'date_created' => 'Date Created',
             'date_updated' => 'Date Updated',
             'added_by' => 'Added By',
