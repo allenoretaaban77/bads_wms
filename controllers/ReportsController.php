@@ -198,9 +198,10 @@ class ReportsController extends Controller
         try {
 
             $sqlDelete = "DELETE FROM daily_financial_snapshots WHERE report_date = :target_date";
-            Yii::$app->db->createCommand($sqlDelete)
-                ->bindValue(':target_date', $date)
-                ->execute();
+            Yii::$app->db->createCommand($sqlDelete)->bindValue(':target_date', $date)->execute();
+
+            // $sqlDeleteLedger = "DELETE FROM daily_business_ledger WHERE report_date = :target_date";
+            // Yii::$app->db->createCommand($sqlDeleteLedger)->bindValue(':target_date', $date)->execute();
 
             $maxId = Yii::$app->db->createCommand("SELECT MAX(id) FROM daily_financial_snapshots")->queryScalar();
             $nextId = $maxId ? ($maxId + 1) : 1;
@@ -306,10 +307,46 @@ class ReportsController extends Controller
                 ON DUPLICATE KEY UPDATE 
                     puhunan = VALUES(puhunan), tubo = VALUES(tubo), total_sales = VALUES(total_sales);
             ";
+            Yii::$app->db->createCommand($sqlGlobalTotal)->bindValue(':target_date', $date)->execute();
 
-            Yii::$app->db->createCommand($sqlGlobalTotal)
-                ->bindValue(':target_date', $date)
-                ->execute();
+            // --- QUERY 3: For Ledger ---
+            $checker = "SELECT * FROM daily_business_ledger WHERE report_date = :target_date";
+            $checkerData = Yii::$app->db->createCommand($checker)->bindValue(':target_date', $date)->queryAll();
+            if (empty($checkerData)) { 
+                $sqlGlobalTotalLedger = "
+                    INSERT INTO daily_business_ledger (report_date, inventory_id, puhunan, tubo, total_sales)
+                    SELECT 
+                        report_date,
+                        0 AS inventory_id,
+                        SUM(puhunan) AS puhunan,
+                        SUM(tubo) AS tubo,
+                        SUM(total_sales) AS total_sales
+                    FROM daily_financial_snapshots
+                    WHERE report_date = :target_date AND inventory_id > 0
+                    GROUP BY report_date
+                    ON DUPLICATE KEY UPDATE 
+                        puhunan = VALUES(puhunan), tubo = VALUES(tubo), total_sales = VALUES(total_sales);
+                ";
+            } else {
+                $sqlGlobalTotalLedger = "
+                    UPDATE daily_business_ledger AS dbl
+                    INNER JOIN (
+                        SELECT 
+                            report_date,
+                            SUM(puhunan) AS total_puhunan,
+                            SUM(tubo) AS total_tubo,
+                            SUM(total_sales) AS total_sales
+                        FROM daily_financial_snapshots
+                        WHERE report_date = :target_date AND inventory_id > 0
+                        GROUP BY report_date
+                    ) AS snapshots ON dbl.report_date = snapshots.report_date
+                    SET 
+                        dbl.puhunan = snapshots.total_puhunan,
+                        dbl.tubo = snapshots.total_tubo,
+                        dbl.total_sales = snapshots.total_sales;
+                ";
+            }
+            Yii::$app->db->createCommand($sqlGlobalTotalLedger)->bindValue(':target_date', $date)->execute();
 
             // Commit changes if everything went well
             $transaction->commit();
@@ -468,8 +505,7 @@ class ReportsController extends Controller
             ORDER BY r.date_received DESC;
         ";
 
-        $data = Yii::$app->db->createCommand($sql)
-            ->queryAll();
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
 
         return [
             'success' => true,
@@ -510,8 +546,7 @@ class ReportsController extends Controller
             WHERE r.date_received = '$date';
         ";
 
-        $data = Yii::$app->db->createCommand($sql)
-            ->queryAll();
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
 
         $total_purchase_cost = 0;
         $total_quantity = 0;
@@ -548,24 +583,17 @@ class ReportsController extends Controller
 
         $sql = "
             SELECT 
-                DATE_FORMAT(s.date_sold, '%Y-%m') AS month, 
-                SUM(COALESCE(dfi.puhunan, 0)) AS total_puhunan,
-                SUM(COALESCE(dfi.tubo, 0)) AS total_tubo,
-                SUM(COALESCE(dfi.total_sales, 0)) AS total_sales
-            FROM sales AS s
-            LEFT JOIN daily_financial_snapshots AS dfi
-                -- Using DATE() strips the time from timestamp so it matches the snapshot date
-                ON DATE(s.date_sold) = dfi.report_date  
-                AND dfi.inventory_id = 0 
-            WHERE s.status = 'approved' -- Optional: filters out inactive sales if needed
-            GROUP BY 
-                DATE_FORMAT(s.date_sold, '%Y-%m')
-            ORDER BY 
-                month DESC;
+                DATE_FORMAT(dfi.report_date, '%Y-%m') AS month,
+                SUM(dfi.puhunan) AS total_puhunan,
+                SUM(dfi.tubo) AS total_tubo,
+                SUM(dfi.total_sales) AS total_sales
+            FROM daily_financial_snapshots AS dfi
+            WHERE dfi.inventory_id = 0
+            GROUP BY DATE_FORMAT(dfi.report_date, '%Y-%m')
+            ORDER BY month DESC;
         ";
 
-        $data = Yii::$app->db->createCommand($sql)
-            ->queryAll();
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
 
         return [
             'success' => true,
@@ -573,5 +601,179 @@ class ReportsController extends Controller
             'data' => $data,
             'headers' => json_encode($tableHeader)
         ];        
+    }
+
+    public function actionGetdailybusinessledger() 
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.monitored = 1";
+        $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
+        $additionalHeader = [];
+        $monitoredIds = [];
+        foreach ($dataInventory as $item) {
+            $additionalHeader[] = ["title"=>"P - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+            $additionalHeader[] = ["title"=>"T - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+            $additionalHeader[] = ["title"=>"TS - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+            $monitoredIds[] = $item["id"];
+        }
+
+        $tableHeader = [
+            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
+            ["title"=>"Date","name"=>"date","align"=>"left","class"=>"w-40"],
+            ["title"=>"Puhunan","name"=>"puhunan","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo","name"=>"tubo","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right","class"=>"w-28"],
+            ["title"=>"Hardware","name"=>"hardware","align"=>"right","class"=>"w-28"],
+            ["title"=>"Bahay","name"=>"bahay","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Amount","name"=>"total_amount","align"=>"right","class"=>"w-28"],
+            ["title"=>"Money On Hand","name"=>"money_on_hand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Puhunan","name"=>"total_puhunan","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Tubo","name"=>"total_tubo","align"=>"right","class"=>"w-28"],
+            ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
+        ];
+        array_splice($tableHeader, 5, 0, $additionalHeader);
+
+        $sql = "
+            SELECT 
+                s.date_sold AS date, 
+                COALESCE(dbl.puhunan, 0) AS puhunan,
+                COALESCE(dbl.tubo, 0) AS tubo,
+                COALESCE(dbl.total_sales, 0) AS total_sales,
+                dbl.hardware AS hardware,
+                dbl.bahay AS bahay,
+                dbl.starting_puhunan AS starting_puhunan,
+                dbl.starting_tubo AS starting_tubo,
+                dbl.starting_money_on_hand AS starting_money_on_hand,
+                dbl.money_on_hand AS money_on_hand,
+                dbl.total_puhunan AS total_puhunan,
+                dbl.total_tubo AS total_tubo
+            FROM sales AS s
+            LEFT JOIN daily_business_ledger AS dbl
+                ON s.date_sold = dbl.report_date 
+                AND dbl.inventory_id = 0 
+            GROUP BY 
+                s.date_sold, 
+                dbl.puhunan, 
+                dbl.tubo,
+                dbl.total_sales 
+            ORDER BY date DESC;
+        ";
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
+
+        $monitoredItem = [];
+        $sqlMonitoredItem = "SELECT * FROM daily_financial_snapshots WHERE inventory_id IN (".implode(",", $monitoredIds).")";
+        $query = Yii::$app->db->createCommand($sqlMonitoredItem)->queryAll();
+        $previous_array = [];
+        foreach($data as $key => $parent) {
+            $previous = $this->getPreviousLedger($parent["date"]);
+            $previous_array[] = $previous;
+            if (!$previous) { 
+                $previous["money_on_hand"] = 0;
+                $previous["total_puhunan"] = 0;
+                $previous["total_tubo"] = 0;
+            }
+
+            $data[$key]["money_on_hand"] = $previous["money_on_hand"];
+            $data[$key]["money_on_hand_str"] = $previous["money_on_hand"];
+
+            $data[$key]["total_puhunan"] = $previous["total_puhunan"];
+            $data[$key]["total_puhunan_str"] = $previous["total_puhunan"];
+
+            $data[$key]["total_tubo"] = $previous["total_tubo"];
+            $data[$key]["total_tubo_str"] = $previous["total_tubo"];
+
+
+            foreach($query as $child) {
+
+                // $data[$key]["tubo"] = 0;
+                // $data[$key]["money_on_hand"] = 0;
+                // $data[$key]["total_amount"] = 0;
+                // $child["tubo"] = 0;
+
+                if ($parent["date"] == $child["report_date"]." 00:00:00") {
+
+                    $data[$key]["p_".$child["inventory_id"]] = $child["puhunan"];
+                    $data[$key]["t_".$child["inventory_id"]] = $child["tubo"];
+                    $data[$key]["ts_".$child["inventory_id"]] = $child["total_sales"];
+
+                    $data[$key]["puhunan"] = (float) $data[$key]["puhunan"] - (float) $child["puhunan"];
+                    $data[$key]["tubo"] = (float) $data[$key]["tubo"] - (float) $child["tubo"];
+                    $data[$key]["total_sales"] = (float) $data[$key]["total_sales"] - (float) $child["total_sales"];
+
+                    $data[$key]["puhunan"] = $data[$key]["puhunan"] < 0 ? 0 : $data[$key]["puhunan"];
+                    $data[$key]["tubo"] = $data[$key]["tubo"] < 0 ? 0 : $data[$key]["tubo"];
+                    $data[$key]["total_sales"] = $data[$key]["total_sales"] < 0 ? 0 : $data[$key]["total_sales"];
+
+                    $data[$key]["money_on_hand"] = $data[$key]["money_on_hand"] + $child["tubo"];
+                    $data[$key]["money_on_hand_str"] = $data[$key]["money_on_hand_str"] . " + " . $child["tubo"];
+
+                    $data[$key]["total_tubo"] = $data[$key]["total_tubo"] + $child["tubo"];
+                    $data[$key]["total_tubo_str"] = $data[$key]["total_tubo_str"] . " + " . $child["tubo"];
+                }
+
+                // $data[$key]["money_on_hand"] = $data[$key]["tubo"] + $child["tubo"] + $data[$key]["total_amount"];
+            }
+
+            $data[$key]["total_amount"] = $data[$key]["hardware"] + $data[$key]["bahay"];
+
+            $data[$key]["money_on_hand"] = $data[$key]["money_on_hand"] + $data[$key]["total_sales"] - $data[$key]["total_amount"];
+            $data[$key]["money_on_hand_str"] = $data[$key]["money_on_hand_str"] . " + " . $data[$key]["total_sales"] . " - " . $data[$key]["total_amount"];
+
+            $data[$key]["total_puhunan"] = $previous["total_puhunan"] + $data[$key]["puhunan"] - $data[$key]["hardware"];
+            // $data[$key]["total_puhunan"] = $data[$key]["starting_puhunan"] + $data[$key]["puhunan"] - $data[$key]["hardware"];
+            $data[$key]["total_puhunan_str"] = $data[$key]["total_puhunan_str"] . " + ". $data[$key]["puhunan"] . " - " . $data[$key]["hardware"];
+
+            $data[$key]["total_tubo"] = $data[$key]["total_tubo"] + $data[$key]["tubo"] - $data[$key]["bahay"];
+            $data[$key]["total_tubo_str"] = $data[$key]["total_tubo_str"] . " + " . $data[$key]["tubo"] . " - " . $data[$key]["bahay"];
+
+            if ($data[$key]["total_sales"] == 0) {
+                $data[$key]["money_on_hand"] = 0;
+                $data[$key]["total_puhunan"] = 0;
+                $data[$key]["total_tubo"] = 0;
+                $data[$key]["money_on_hand_str"] = "";
+                $data[$key]["total_puhunan_str"] = "";
+                $data[$key]["total_tubo_str"] = "";
+            }
+
+            $sqlUpdateLedger = "
+                UPDATE daily_business_ledger AS dbl
+                SET 
+                    dbl.total_puhunan = ".$data[$key]["total_puhunan"].",
+                    dbl.total_tubo = ".$data[$key]["total_tubo"].",
+                    dbl.money_on_hand = ".$data[$key]["money_on_hand"]."
+                WHERE report_date = :target_date AND inventory_id = 0;
+            ";
+            Yii::$app->db->createCommand($sqlUpdateLedger)->bindValue(':target_date', $parent["date"])->execute();
+        }
+
+        return [
+            'data' => $data,
+            'count' => count($data),
+            'previous_array' => $previous_array,
+            'mids' => $monitoredIds,
+            'sqlMonitoredItem' => $sqlMonitoredItem,
+            // 'monitored_items' => $query,
+            'success' => true,
+            'headers' => json_encode($tableHeader)
+        ];       
+    }
+
+    public function getPreviousLedger($date) 
+    {
+        // Clean up the date string (removing time stamp if it exists) to match DATE data type
+        $cleanDate = date('Y-m-d', strtotime($date));
+
+        $sql = "
+            SELECT * FROM `daily_business_ledger`
+            WHERE `report_date` < :selected_date 
+            ORDER BY `report_date` DESC
+            LIMIT 1;
+        ";
+
+        return Yii::$app->db->createCommand($sql)->bindValue(':selected_date', $cleanDate)->queryOne(); 
     }
 }
