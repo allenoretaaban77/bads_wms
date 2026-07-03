@@ -276,6 +276,7 @@ class SalesController extends Controller
                 'sku' => 'i.sku',
                 'sales_items.qty_sold AS qty_sold',
                 'sales_items.total AS total',
+                'sales_items.price_per_unit AS price_per_unit',
                 // 'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold',
                 // 'SUM(COALESCE(sales_items.total, 0)) AS total',  
             ])

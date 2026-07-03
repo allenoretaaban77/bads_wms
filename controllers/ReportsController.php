@@ -617,7 +617,8 @@ class ReportsController extends Controller
         foreach ($dataInventory as $item) {
             $additionalHeader[] = ["title"=>"P - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
             $additionalHeader[] = ["title"=>"T - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-            $additionalHeader[] = ["title"=>"TS - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+            $additionalHeader[] = ["title"=>"Ex - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+            // $additionalHeader[] = ["title"=>"TS - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
             $monitoredIds[] = $item["id"];
         }
 
@@ -699,6 +700,7 @@ class ReportsController extends Controller
                     $data[$key]["p_".$child["inventory_id"]] = $child["puhunan"];
                     $data[$key]["t_".$child["inventory_id"]] = $child["tubo"];
                     $data[$key]["ts_".$child["inventory_id"]] = $child["total_sales"];
+                    $data[$key]["ex_".$child["inventory_id"]] = $child["total_sales"];
 
                     $data[$key]["puhunan"] = (float) $data[$key]["puhunan"] - (float) $child["puhunan"];
                     $data[$key]["tubo"] = (float) $data[$key]["tubo"] - (float) $child["tubo"];
