@@ -261,6 +261,13 @@ class SalesController extends Controller
     public function actionViewsales($id)
     {
         $sales = Sales::find()
+            ->select([
+                'sales.*',
+                'total_quantity' => (new \yii\db\Query())
+                    ->select('SUM(sales_items.qty_sold)')
+                    ->from('sales_items')
+                    ->where('sales_id = '.$id)
+            ])
             ->where(['id' => $id])
             ->asArray()
             ->one();
@@ -393,7 +400,7 @@ class SalesController extends Controller
                     // Process manual batch allocations
                     foreach ($allocatedBatches as $allocated) {
                         $batchId = $allocated['batch_id'];
-                        $qtyOut = (int)$allocated['quantity_out'];
+                        $qtyOut = (float)$allocated['quantity_out'];
                         $costPerUnit = 0.00;
 
                         // Draft state fallback
@@ -435,7 +442,7 @@ class SalesController extends Controller
                             break;
                         }
 
-                        $currentBatchQty = (int)$batch->current_qty;
+                        $currentBatchQty = (float)$batch->current_qty;
                         // Deduct either what remains or up to the max capacity of this specific bucket layer
                         $deductionAmount = min($currentBatchQty, $remainderToDeduct);
                         $costPerUnit = (float)$batch->cost_per_unit;
@@ -597,7 +604,7 @@ class SalesController extends Controller
                     // Process manual batch allocations for draft
                     foreach ($allocatedBatches as $allocated) {
                         $batchId = $allocated['batch_id'];
-                        $qtyOut = (int)$allocated['quantity_out'];
+                        $qtyOut = (float)$allocated['quantity_out'];
                         $costPerUnit = 0.00;
 
                         $batch = InventoryBatches::findOne(['id' => $batchId, 'inventory_id' => $inventory->id]);
@@ -636,7 +643,7 @@ class SalesController extends Controller
                             break;
                         }
 
-                        $currentBatchQty = (int)$batch->current_qty;
+                        $currentBatchQty = (float)$batch->current_qty;
                         $deductionAmount = min($currentBatchQty, $remainderToDeduct);
                         $costPerUnit = (float)$batch->cost_per_unit;
 
@@ -767,22 +774,21 @@ class SalesController extends Controller
 
                         // Update product master summary metric
                         $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $line->qty_sold]);
-                        if ($line->price_per_unit > 0) {
-                            // $inventory->price_per_unit = $line->price_per_unit; // do not update as per client
-                        }
                         $inventory->save(false);
                     }
 
                 } elseif ($inventory->tracking_method === 'standard') {
-                    // Total up what this draft originally required for a standard FIFO verification pass
+                    // 1. Total up the absolute volume required across ALL price points for this item
                     $totalQtyRequired = array_sum(array_column($lines, 'qty_sold'));
 
-                    // Re-query current live valid FIFO pools using SELECT ... FOR UPDATE to handle live concurrency
+                    // 2. Lock and retrieve the live FIFO pools once for this item to ensure safe concurrency
                     $batchesQuery = InventoryBatches::find()
                         ->where(['inventory_id' => $inventory->id])
                         ->andWhere(['>', 'current_qty', 0])
                         ->orderBy(['id' => SORT_ASC]);
                     $batchCmd = $batchesQuery->createCommand();
+                    
+                    /** @var InventoryBatches[] $availableBatches */
                     $availableBatches = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->all();
 
                     $totalAvailableStock = array_sum(array_column($availableBatches, 'current_qty'));
@@ -795,37 +801,53 @@ class SalesController extends Controller
                         ];
                     }
 
-                    // Re-run real-time assignment to reflect actual current state safely
-                    // Step A: Clear the draft rows for this specific item inside this transaction
+                    // 3. Clear out the stale placeholder draft rows for this inventory item entirely
                     SalesItems::deleteAll(['sales_id' => $sales->id, 'inventory_id' => $inventory->id]);
 
-                    $remainderToDeduct = $totalQtyRequired;
+                    // 4. Run real-time FIFO calculations without collapsing lines.
+                    // Loop through each distinct line entry to preserve its custom unit price.
+                    $currentBatchIndex = 0;
 
-                    foreach ($availableBatches as $batch) {
-                        if ($remainderToDeduct <= 0) {
-                            break;
+                    foreach ($lines as $line) {
+                        $remainderToDeduct = (float)$line->qty_sold;
+                        $pricePerUnit = (float)$line->price_per_unit; // Exact price point preserved
+
+                        while ($remainderToDeduct > 0 && isset($availableBatches[$currentBatchIndex])) {
+                            $batch = $availableBatches[$currentBatchIndex];
+                            
+                            // Refresh current batch quantity, accounting for deductions made in previous loop cycles
+                            $currentBatchQty = ($batch->current_qty instanceof \yii\db\Expression) 
+                                ? (float)InventoryBatches::findOne($batch->id)->current_qty 
+                                : (float)$batch->current_qty;
+
+                            if ($currentBatchQty <= 0) {
+                                $currentBatchIndex++;
+                                continue;
+                            }
+
+                            $deductionAmount = min($currentBatchQty, $remainderToDeduct);
+                            $costPerUnit = (float)$batch->cost_per_unit;
+
+                            // Deduct from live batch record
+                            $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $deductionAmount]);
+                            $batch->save(false);
+
+                            // Update master summary totals
+                            $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $deductionAmount]);
+                            $inventory->save(false);
+
+                            // Write the synchronized finalized line item using the exact user-defined price point
+                            $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+
+                            $remainderToDeduct -= $deductionAmount;
+
+                            // Explicitly update our local active batch cache value so the next iterations track it accurately
+                            $batch->current_qty = $currentBatchQty - $deductionAmount;
+                            
+                            if ($batch->current_qty <= 0) {
+                                $currentBatchIndex++;
+                            }
                         }
-
-                        $currentBatchQty = (int)$batch->current_qty;
-                        $deductionAmount = min($currentBatchQty, $remainderToDeduct);
-                        $costPerUnit = (float)$batch->cost_per_unit;
-                        $pricePerUnit = (float)$lines[0]->price_per_unit; // Inherit original unit pricing
-
-                        // Deduct from current batch row
-                        $batch->current_qty = new \yii\db\Expression('current_qty - :qty', [':qty' => $deductionAmount]);
-                        $batch->save(false);
-
-                        // Update master summaries tracker metrics
-                        $inventory->total_sold = new \yii\db\Expression('COALESCE(total_sold, 0) + :qty', [':qty' => $deductionAmount]);
-                        if ($pricePerUnit > 0) {
-                            // $inventory->price_per_unit = $pricePerUnit; // do not update as per client
-                        }
-                        $inventory->save(false);
-
-                        // Re-write final synchronized item line row parameters
-                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
-
-                        $remainderToDeduct -= $deductionAmount;
                     }
                 }
             }

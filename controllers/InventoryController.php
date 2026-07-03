@@ -528,7 +528,7 @@ class InventoryController extends Controller
 
         // Clean up raw numeric values for JSON formatting
         foreach ($items as &$item) {
-            $item['current_qty'] = (int)$item['current_qty'];
+            $item['current_qty'] = (float)$item['current_qty'];
         }
         unset($item);
 
@@ -1220,7 +1220,6 @@ class InventoryController extends Controller
             return ['error' => 'Method not allowed'];
         }
     }
-
 
     public function actionUpdatebatchcostsOld()
     {

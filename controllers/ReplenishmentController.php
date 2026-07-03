@@ -274,7 +274,7 @@ class ReplenishmentController extends Controller
 
         // Typecast current_qty elements to integers since SQL SUM() returns strings/floats
         foreach ($items as &$item) {
-            $item['current_qty'] = isset($item['current_qty']) ? (int)$item['current_qty'] : 0;
+            $item['current_qty'] = isset($item['current_qty']) ? (float)$item['current_qty'] : 0;
         }
         unset($item); // Break reference pointer link safety wrapper
 
@@ -430,7 +430,7 @@ class ReplenishmentController extends Controller
         // Server-side calculation of the total amount to prevent client tampering
         $calculatedAmount = 0.0;
         foreach ($requestData['items'] as $itemData) {
-            $qty = (int)($itemData['quantity'] ?? 0);
+            $qty = (float)($itemData['quantity'] ?? 0);
             $cost = (float)($itemData['cost'] ?? 0);
             if ($qty > 0 && $cost > 0) {
                 $calculatedAmount += ($qty * $cost);
@@ -488,7 +488,7 @@ class ReplenishmentController extends Controller
                     ];
                 }
 
-                $qtyAdded = (int)($itemData['quantity'] ?? 0);
+                $qtyAdded = (float)($itemData['quantity'] ?? 0);
                 $costPerUnit = (float)($itemData['cost'] ?? 0);
 
                 if ($qtyAdded < 1) {
