@@ -80,6 +80,10 @@ class SalesController extends Controller
             'amount' => (new \yii\db\Query())
                 ->select('SUM(qty_sold * price_per_unit)')
                 ->from('sales_items')
+                ->where('sales_id = sales.id'),
+            'item_count' => (new \yii\db\Query())
+                ->select('COUNT(*)')
+                ->from('sales_items')
                 ->where('sales_id = sales.id')
         ]);
         // ->where(['sales.record_status' => 'active']);
