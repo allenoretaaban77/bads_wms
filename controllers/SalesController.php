@@ -1163,4 +1163,161 @@ class SalesController extends Controller
 
         return ['success' => true, 'data' => $sale];
     }
+
+    public function actionRevert()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $requestData = $request->post();
+        $invoice_no = $request->getBodyParam('invoice_no') ?? ($requestData['invoice_no'] ?? null);
+
+        if (empty($invoice_no)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['invoice_no' => ['Invoice number is required.']]];
+        }
+
+        // Fetch the target sales record
+        $sales = Sales::findOne(['invoice_no' => $invoice_no]);
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => "Invoice '{$invoice_no}' not found."];
+        }
+
+        // Concurrency Guard: Ensure it is currently approved before reverting
+        if ($sales->status !== 'approved') {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['status' => ["Invoice '{$invoice_no}' is not in an approved state."]]];
+        }
+
+        $oldData = $sales->attributes;
+        $salesItems = SalesItems::findAll(['sales_id' => $sales->id]);
+
+        if (empty($salesItems)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['items' => ['Cannot revert an invoice with no items.']]];
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // Update primary document tracking properties back to original state
+            $sales->status = 'draft'; // Or 'pending', depending on your original draft workflow state
+            $sales->payment_status = $requestData['payment_status'] ?? 'pending';
+            $sales->is_paid = 'no';
+            $sales->date_updated = date('Y-m-d H:i:s');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            // Group the existing finalized line items by inventory ID
+            $itemsGrouped = [];
+            foreach ($salesItems as $item) {
+                $itemsGrouped[$item->inventory_id][] = $item;
+            }
+
+            foreach ($itemsGrouped as $inventoryId => $lines) {
+                $inventory = Inventory::findOne($inventoryId);
+                if (!$inventory) {
+                    $transaction->rollBack();
+                    Yii::$app->response->statusCode = 422;
+                    return ['error' => 'Validation failed', 'errors' => ['items' => ["Inventory item ID {$inventoryId} no longer exists."]]];
+                }
+
+                if ($inventory->tracking_method === 'batch_monitored') {
+                    // For batch-monitored items, simply return the stock directly back to its designated batch
+                    foreach ($lines as $line) {
+                        $batchQuery = InventoryBatches::find()->where(['id' => $line->batch_id, 'inventory_id' => $inventory->id]);
+                        $batchCmd = $batchQuery->createCommand();
+                        $batch = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->one();
+
+                        if ($batch) {
+                            // Atomic stock restoration
+                            $batch->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $line->qty_sold]);
+                            $batch->save(false);
+                        }
+
+                        // Reduce product master summary metric
+                        $inventory->total_sold = new \yii\db\Expression('GREATEST(0, COALESCE(total_sold, 0) - :qty)', [':qty' => $line->qty_sold]);
+                        $inventory->save(false);
+                    }
+
+                } elseif ($inventory->tracking_method === 'standard') {
+                    // Standard items were split across several rows by FIFO during approval.
+                    // We need to consolidate them back into single placeholder lines per unique price point.
+                    $consolidatedLines = [];
+
+                    foreach ($lines as $line) {
+                        $qty = (float)$line->qty_sold;
+                        $price = (float)$line->price_per_unit;
+
+                        // 1. Return stock to the exact database batch layers it came from
+                        $batchQuery = InventoryBatches::find()->where(['id' => $line->batch_id, 'inventory_id' => $inventory->id]);
+                        $batchCmd = $batchQuery->createCommand();
+                        $batch = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->one();
+
+                        if ($batch) {
+                            $batch->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $qty]);
+                            $batch->save(false);
+                        }
+
+                        // 2. Reduce master item summary metrics
+                        $inventory->total_sold = new \yii\db\Expression('GREATEST(0, COALESCE(total_sold, 0) - :qty)', [':qty' => $qty]);
+                        $inventory->save(false);
+
+                        // 3. Track unique price points to recreate the generic placeholder lines
+                        $priceKey = stringval($price);
+                        if (!isset($consolidatedLines[$priceKey])) {
+                            $consolidatedLines[$priceKey] = 0;
+                        }
+                        $consolidatedLines[$priceKey] += $qty;
+                    }
+
+                    // 4. Wipe out the split FIFO finalized rows completely
+                    SalesItems::deleteAll(['sales_id' => $sales->id, 'inventory_id' => $inventory->id]);
+
+                    // 5. Restore the clean draft placeholder rows per unique original price point
+                    foreach ($consolidatedLines as $pricePerUnit => $totalQtyRestored) {
+                        $this->saveSalesItemRow(
+                            $sales->id, 
+                            $inventory->id, 
+                            null, // Clear out the batch assignment on draft restoration
+                            $totalQtyRestored, 
+                            (float)$pricePerUnit, 
+                            0.00 // Revert cost back to 0 or a generic fallback for non-approved states
+                        );
+                    }
+                }
+            }
+
+            // Write validation action event parameters cleanly into audit database logs
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'revert',
+                'old_data' => json_encode(['status' => $oldData['status']]),
+                'new_data' => json_encode(['status' => $sales->status]),
+                'updated_by' => $requestData['reverted_by'] ?? ($sales->added_by),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice reverted to draft successfully and stock inventory restocked.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+    
 }

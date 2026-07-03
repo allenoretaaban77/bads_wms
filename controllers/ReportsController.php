@@ -645,13 +645,16 @@ class ReportsController extends Controller
                 COALESCE(dbl.tubo, 0) AS tubo,
                 COALESCE(dbl.total_sales, 0) AS total_sales,
                 dbl.hardware AS hardware,
+                dbl.hardware_details AS hardware_details,
                 dbl.bahay AS bahay,
+                dbl.bahay_details AS bahay_details,
                 dbl.starting_puhunan AS starting_puhunan,
                 dbl.starting_tubo AS starting_tubo,
                 dbl.starting_money_on_hand AS starting_money_on_hand,
                 dbl.money_on_hand AS money_on_hand,
                 dbl.total_puhunan AS total_puhunan,
-                dbl.total_tubo AS total_tubo
+                dbl.total_tubo AS total_tubo,
+                dbl.id
             FROM sales AS s
             LEFT JOIN daily_business_ledger AS dbl
                 ON s.date_sold = dbl.report_date 
@@ -665,10 +668,11 @@ class ReportsController extends Controller
         ";
         $data = Yii::$app->db->createCommand($sql)->queryAll();
 
-        $monitoredItem = [];
+        $monitoredItems = [];
         $sqlMonitoredItem = "SELECT * FROM daily_financial_snapshots WHERE inventory_id IN (".implode(",", $monitoredIds).")";
         $query = Yii::$app->db->createCommand($sqlMonitoredItem)->queryAll();
         $previous_array = [];
+        $query_mi = [];
         foreach($data as $key => $parent) {
             $previous = $this->getPreviousLedger($parent["date"]);
             $previous_array[] = $previous;
@@ -687,7 +691,7 @@ class ReportsController extends Controller
             $data[$key]["total_tubo"] = $previous["total_tubo"];
             $data[$key]["total_tubo_str"] = $previous["total_tubo"];
 
-
+            $query_mi[] = [];
             foreach($query as $child) {
 
                 // $data[$key]["tubo"] = 0;
@@ -695,12 +699,14 @@ class ReportsController extends Controller
                 // $data[$key]["total_amount"] = 0;
                 // $child["tubo"] = 0;
 
-                if ($parent["date"] == $child["report_date"]." 00:00:00") {
+                $query_mi[] = "SELECT * FROM monitored_items WHERE ledger_id = :ledger_id".$data[$key]["id"]." | ".$child["inventory_id"];
+                // Yii::$app->db->createCommand("")->bindValue(':ledger_id', $data[$key]["id"])->queryOne();
+                $data[$key]["ex_".$child["inventory_id"]] = 0 ;
 
+                if ($parent["date"] == $child["report_date"]." 00:00:00") {
                     $data[$key]["p_".$child["inventory_id"]] = $child["puhunan"];
                     $data[$key]["t_".$child["inventory_id"]] = $child["tubo"];
                     $data[$key]["ts_".$child["inventory_id"]] = $child["total_sales"];
-                    $data[$key]["ex_".$child["inventory_id"]] = $child["total_sales"];
 
                     $data[$key]["puhunan"] = (float) $data[$key]["puhunan"] - (float) $child["puhunan"];
                     $data[$key]["tubo"] = (float) $data[$key]["tubo"] - (float) $child["tubo"];
@@ -753,12 +759,13 @@ class ReportsController extends Controller
         }
 
         return [
+            'query_mi' => $query_mi,
+            'monitored_items' => $dataInventory,
             'data' => $data,
             'count' => count($data),
             'previous_array' => $previous_array,
-            'mids' => $monitoredIds,
+            'mids' => $dataInventory,
             'sqlMonitoredItem' => $sqlMonitoredItem,
-            // 'monitored_items' => $query,
             'success' => true,
             'headers' => json_encode($tableHeader)
         ];       
@@ -777,5 +784,60 @@ class ReportsController extends Controller
         ";
 
         return Yii::$app->db->createCommand($sql)->bindValue(':selected_date', $cleanDate)->queryOne(); 
+    }
+
+    public function actionUpdateledgervalue() 
+    {
+        // 1. Force JSON response format
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'PUT') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        // 2. Extract parameters from the POST body
+        $id = Yii::$app->request->getBodyParam('id');
+        $amount = Yii::$app->request->getBodyParam('amount');
+        $details = Yii::$app->request->getBodyParam('details');
+        $save_type = Yii::$app->request->getBodyParam('save_type');
+
+        // 3. Validation: Make sure the required fields exist
+        if (!$id) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'ID parameter is required'];
+        }
+        if ($amount === null || $details === null) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Both '.$save_type.' and '.$save_type.'_details are required'];
+        }
+
+        try {
+            // 4. Execute the update query using parameters
+            $sql = "UPDATE daily_business_ledger SET ".$save_type." = :amount, ".$save_type."_details = :details WHERE id = :id";
+
+            $rowsAffected = Yii::$app->db->createCommand($sql)
+                ->bindValues([
+                    ':amount' => $amount,
+                    ':details' => $details,
+                    ':id' => $id,
+                ])
+                ->execute();
+
+            // 5. Return success status
+            return [
+                'success' => true,
+                'message' => 'Ledger updated successfully',
+                'rows_affected' => $rowsAffected
+            ];
+
+        } catch (\Exception $e) {
+            // Handle database errors gracefully without crashing the API
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'error' => 'Database error: ' . $e->getMessage()
+            ];
+        }
     }
 }
