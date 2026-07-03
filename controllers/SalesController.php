@@ -1164,7 +1164,7 @@ class SalesController extends Controller
         return ['success' => true, 'data' => $sale];
     }
 
-    public function actionRevert()
+    public function actionRevertOld()
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
@@ -1319,5 +1319,101 @@ class SalesController extends Controller
             return ['success' => false, 'error' => $e->getMessage()];
         }
     }
-    
+
+    public function actionRevert()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $request = Yii::$app->request;
+        $requestData = $request->post();
+        $invoice_no = $request->getBodyParam('invoice_no') ?? ($requestData['invoice_no'] ?? null);
+
+        if (empty($invoice_no)) {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['invoice_no' => ['Invoice number is required.']]];
+        }
+
+        // Fetch the target sales record
+        $sales = Sales::findOne(['invoice_no' => $invoice_no]);
+        if (!$sales) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => "Invoice '{$invoice_no}' not found."];
+        }
+
+        // Ensure it is actually approved before attempting to reverse it
+        if ($sales->status !== 'approved') {
+            Yii::$app->response->statusCode = 422;
+            return ['error' => 'Validation failed', 'errors' => ['status' => ["Invoice '{$invoice_no}' is not approved and cannot be reversed."]]];
+        }
+
+        $oldData = $sales->attributes;
+        $salesItems = SalesItems::findAll(['sales_id' => $sales->id]);
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            // 1. Revert primary document status back to draft
+            $sales->status = 'draft';
+            $sales->is_paid = 'no';
+            $sales->date_updated = date('Y-m-d H:i:s');
+
+            if (!$sales->save()) {
+                $transaction->rollBack();
+                Yii::$app->response->statusCode = 422;
+                return ['error' => 'Validation failed', 'errors' => $sales->getErrors()];
+            }
+
+            // 2. Loop through sales items and restore original stock balances
+            foreach ($salesItems as $line) {
+                // Fetch and lock the batch to restore quantities safely
+                $batchQuery = InventoryBatches::find()->where(['id' => $line->batch_id]);
+                $batchCmd = $batchQuery->createCommand();
+                $batch = InventoryBatches::findBySql($batchCmd->getSql() . ' FOR UPDATE', $batchCmd->params)->one();
+
+                if ($batch) {
+                    // Atomic stock restoration
+                    $batch->current_qty = new \yii\db\Expression('current_qty + :qty', [':qty' => $line->qty_sold]);
+                    $batch->save(false);
+                }
+
+                // Fetch and lock main inventory record to reverse master metrics
+                $inventoryQuery = Inventory::find()->where(['id' => $line->inventory_id]);
+                $inventoryCmd = $inventoryQuery->createCommand();
+                $inventory = Inventory::findBySql($inventoryCmd->getSql() . ' FOR UPDATE', $inventoryCmd->params)->one();
+
+                if ($inventory) {
+                    // Reduce total sold metric safely
+                    $inventory->total_sold = new \yii\db\Expression('GREATEST(0, COALESCE(total_sold, 0) - :qty)', [':qty' => $line->qty_sold]);
+                    $inventory->save(false);
+                }
+            }
+
+            // 3. Write reversal tracking details into audit database logs
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'sales',
+                'entity_id' => $sales->id,
+                'action' => 'reverse',
+                'old_data' => json_encode(['status' => $oldData['status']]),
+                'new_data' => json_encode(['status' => $sales->status]),
+                'updated_by' => $requestData['reversed_by'] ?? ($sales->added_by),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'message' => 'Sales invoice reversal executed successfully. Stock layers restored.',
+                'id' => $sales->id
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+
 }
