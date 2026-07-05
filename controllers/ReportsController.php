@@ -374,6 +374,8 @@ class ReportsController extends Controller
             return ['error' => 'Method not allowed'];
         }
 
+        $request = Yii::$app->request;
+
         $tableHeader = [
             ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
             ["title"=>"Date","name"=>"date","align"=>"left"],
@@ -383,26 +385,88 @@ class ReportsController extends Controller
             ["title"=>"Action","name"=>"action","default"=>1],
         ];
 
+        // $sql = "
+        //     SELECT 
+        //         s.date_sold AS date, 
+        //         COALESCE(dfi.puhunan, 0) AS puhunan,
+        //         COALESCE(dfi.tubo, 0) AS tubo,
+        //         COALESCE(dfi.total_sales, 0) AS total_sales
+        //     FROM sales AS s
+        //     LEFT JOIN daily_financial_snapshots AS dfi
+        //         ON s.date_sold = dfi.report_date 
+        //         AND dfi.inventory_id = 0 
+        //     GROUP BY 
+        //         s.date_sold, 
+        //         dfi.puhunan, 
+        //         dfi.tubo,
+        //         dfi.total_sales 
+        //     ORDER BY date DESC;
+        // ";
+        // $data = Yii::$app->db->createCommand($sql)->queryAll();
+
+        $pageType = $request->get('pageType');
+        $query_where = "";
+
+        if (!empty($pageType)) {
+            if ($pageType == "unmonitored") {
+                $query_where = "
+                    WHERE s.status = 'approved' 
+                        AND s.is_paid = 'yes' 
+                        AND i.monitored = 0
+                ";
+            } else {
+                $query_where = "
+                    WHERE s.status = 'approved' 
+                        AND s.is_paid = 'yes' 
+                        AND i.monitored = 1
+                        AND i.type = :type
+                ";
+            }
+        } else {
+            $query_where = "
+                WHERE s.status = 'approved' 
+                    AND s.is_paid = 'yes' 
+            ";
+        }
+
         $sql = "
+            WITH unique_dates AS (
+                SELECT DISTINCT DATE(date_sold) AS sales_date
+                FROM sales
+            ),
+            cement_sales AS (
+                SELECT 
+                    DATE(s.date_sold) AS sales_date,
+                    SUM(si.qty_sold * si.cost_per_unit) AS total_puhunan,
+                    SUM(si.total - (si.qty_sold * si.cost_per_unit)) AS total_tubo,
+                    SUM(si.total) AS total_sales
+                FROM sales s
+                    INNER JOIN sales_items si ON s.id = si.sales_id
+                    INNER JOIN inventory AS i ON i.id = si.inventory_id
+                $query_where
+                GROUP BY DATE(s.date_sold)
+            )
             SELECT 
-                s.date_sold AS date, 
-                COALESCE(dfi.puhunan, 0) AS puhunan,
-                COALESCE(dfi.tubo, 0) AS tubo,
-                COALESCE(dfi.total_sales, 0) AS total_sales
-            FROM sales AS s
-            LEFT JOIN daily_financial_snapshots AS dfi
-                ON s.date_sold = dfi.report_date 
-                AND dfi.inventory_id = 0 
-            GROUP BY 
-                s.date_sold, 
-                dfi.puhunan, 
-                dfi.tubo,
-                dfi.total_sales 
+               ud.sales_date AS date,
+               COALESCE(cs.total_puhunan, 0) AS puhunan,
+               COALESCE(cs.total_tubo, 0) AS tubo,
+               COALESCE(cs.total_sales, 0) AS total_sales
+            FROM unique_dates ud
+            LEFT JOIN cement_sales cs ON ud.sales_date = cs.sales_date
             ORDER BY date DESC;
         ";
 
-        $data = Yii::$app->db->createCommand($sql)
-            ->queryAll();
+        $data = [];
+
+        if (!empty($pageType)) {
+            if ($pageType == "unmonitored") {
+                $data = Yii::$app->db->createCommand($sql)->queryAll(); 
+            } else {
+                $data = Yii::$app->db->createCommand($sql)->bindValue(':type', $pageType)->queryAll(); 
+            }
+        } else {
+            $data = Yii::$app->db->createCommand($sql)->queryAll(); 
+        }
 
         return [
             'success' => true,
@@ -425,6 +489,16 @@ class ReportsController extends Controller
             return ['error' => 'Date parameter is required'];
         }
 
+        $page_type = Yii::$app->request->getBodyParam('page_type');
+        $page_type_string = "";
+        if (trim($page_type) != "") {
+            if ($page_type == "unmonitored") {
+                $page_type_string = "AND monitored = 0";
+            } else {
+                $page_type_string = "AND monitored = 1 AND i.type = :type ";
+            }
+        }
+
         $sql = "
             SELECT 
                 i.sku AS sku,
@@ -444,17 +518,17 @@ class ReportsController extends Controller
                 ON si.id = dfi.source_item_id
             LEFT JOIN sales as s
                 ON si.sales_id = s.id
-            WHERE dfi.inventory_id != 0 AND dfi.report_date = '$date'
-            -- GROUP BY 
-            --     s.date_sold, 
-            --     dfi.puhunan, 
-            --     dfi.tubo,
-            --     dfi.total_sales 
+            WHERE dfi.inventory_id != 0 AND dfi.report_date = '$date' ".$page_type_string."  
             ORDER BY dfi.source_item_id ASC;
         ";
 
-        $data = Yii::$app->db->createCommand($sql)
-            ->queryAll();
+        $sql_query = Yii::$app->db->createCommand($sql);
+        if (trim($page_type) != "") {
+            if ($page_type != "unmonitored") {
+                $sql_query->bindValue(':type', $page_type);
+            }
+        }
+        $data = $sql_query->queryAll();
 
         $totalPuhunan = 0;
         $totalTubo = 0;
@@ -699,7 +773,7 @@ class ReportsController extends Controller
                 // $data[$key]["total_amount"] = 0;
                 // $child["tubo"] = 0;
 
-                $query_mi[] = "SELECT * FROM monitored_items WHERE ledger_id = :ledger_id".$data[$key]["id"]." | ".$child["inventory_id"];
+                // $query_mi[] = "SELECT * FROM monitored_items WHERE ledger_id = :ledger_id".$data[$key]["id"]." | ".$child["inventory_id"];
                 // Yii::$app->db->createCommand("")->bindValue(':ledger_id', $data[$key]["id"])->queryOne();
                 $data[$key]["ex_".$child["inventory_id"]] = 0 ;
 
