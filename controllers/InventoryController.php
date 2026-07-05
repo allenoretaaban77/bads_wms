@@ -989,6 +989,14 @@ class InventoryController extends Controller
             return ['error' => 'Failed to save item'];
         }
 
+        if ((int) $item->monitored == 1) {
+            $sql = "
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `ex_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `ex_".$item->id."_details` TEXT NOT NULL;
+            ";
+            Yii::$app->db->createCommand($sql)->execute();
+        }
+
         // ✅ Insert into audit log after successful update
         Yii::$app->db->createCommand()->insert('audit_log', [
             'entity' => 'inventory',
@@ -1058,6 +1066,20 @@ class InventoryController extends Controller
             Yii::$app->response->statusCode = 500;
             return ['error' => 'Failed to save item'];
         }
+
+        $sql = "";
+        if ((int) $item->monitored == 1) {
+            $sql = "
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `ex_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `ex_".$item->id."_details` TEXT NOT NULL;
+            ";
+        } else {
+            $sql = "
+                ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `ex_".$item->id."`;
+                ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `ex_".$item->id."_details`;
+            ";
+        }
+        Yii::$app->db->createCommand($sql)->execute();
 
         // ✅ Insert into audit log after successful update
         Yii::$app->db->createCommand()->insert('audit_log', [

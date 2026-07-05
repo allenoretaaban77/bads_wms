@@ -104,21 +104,21 @@ class ReportsController extends Controller
                 SELECT DATE(sales.date_sold) AS report_date, si.inventory_id 
                 FROM sales 
                 JOIN sales_items si ON sales.id = si.sales_id
-                WHERE sales.status = 'approved' AND sales.record_status = 'active' AND si.record_status = 'active'
+                WHERE sales.status = 'approved' AND is_paid = 'yes'
                 
                 UNION
                 
                 SELECT DATE(replenishment.date_received) AS report_date, ri.inventory_id 
                 FROM replenishment 
                 JOIN replenishment_items ri ON replenishment.id = ri.transaction_id
-                WHERE replenishment.status = 'approved' AND replenishment.record_status = 'active' AND ri.record_status = 'active'
+                WHERE replenishment.status = 'approved' AND is_paid = 'yes'
                 
                 UNION
                 
                 SELECT DATE(`returns`.date_received) AS report_date, ret_i.inventory_id 
                 FROM `returns` 
                 JOIN returns_items ret_i ON `returns`.id = ret_i.return_id
-                WHERE `returns`.status = 'approved' AND `returns`.record_status = 'active' AND ret_i.record_status = 'active'
+                WHERE `returns`.status = 'approved' AND is_paid = 'yes'
             ) d
             JOIN inventory i ON d.inventory_id = i.id
             LEFT JOIN (
@@ -130,7 +130,7 @@ class ReportsController extends Controller
                     SUM(items.qty_sold * items.cost_per_unit) AS total_cogs
                 FROM sales main
                 JOIN sales_items items ON main.id = items.sales_id
-                WHERE main.status = 'approved' AND main.record_status = 'active' AND items.record_status = 'active'
+                WHERE main.status = 'approved' AND is_paid = 'yes'
                 GROUP BY DATE(main.date_sold), items.inventory_id
             ) s ON d.report_date = s.report_date AND d.inventory_id = s.inventory_id
             LEFT JOIN (
@@ -141,7 +141,7 @@ class ReportsController extends Controller
                     SUM(items.qty_returned * items.unit_price) AS total_returns
                 FROM `returns` main
                 JOIN returns_items items ON main.id = items.return_id
-                WHERE main.status = 'approved' AND main.record_status = 'active' AND items.record_status = 'active'
+                WHERE main.status = 'approved' AND is_paid = 'yes'
                 GROUP BY DATE(main.date_received), items.inventory_id
             ) r ON d.report_date = r.report_date AND d.inventory_id = r.inventory_id
             LEFT JOIN (
@@ -152,7 +152,7 @@ class ReportsController extends Controller
                     SUM(items.qty_added * items.cost_per_unit) AS replenishment_spend
                 FROM replenishment main
                 JOIN replenishment_items items ON main.id = items.transaction_id
-                WHERE main.status = 'approved' AND main.record_status = 'active' AND items.record_status = 'active'
+                WHERE main.status = 'approved' AND is_paid = 'yes'
                 GROUP BY DATE(main.date_received), items.inventory_id
             ) rep ON d.report_date = rep.report_date AND d.inventory_id = rep.inventory_id
             WHERE d.report_date BETWEEN :start_date AND :end_date
@@ -434,7 +434,7 @@ class ReportsController extends Controller
                 SELECT DISTINCT DATE(date_sold) AS sales_date
                 FROM sales
             ),
-            cement_sales AS (
+            daily_sales AS (
                 SELECT 
                     DATE(s.date_sold) AS sales_date,
                     SUM(si.qty_sold * si.cost_per_unit) AS total_puhunan,
@@ -452,7 +452,7 @@ class ReportsController extends Controller
                COALESCE(cs.total_tubo, 0) AS tubo,
                COALESCE(cs.total_sales, 0) AS total_sales
             FROM unique_dates ud
-            LEFT JOIN cement_sales cs ON ud.sales_date = cs.sales_date
+            LEFT JOIN daily_sales cs ON ud.sales_date = cs.sales_date
             ORDER BY date DESC;
         ";
 
@@ -493,33 +493,26 @@ class ReportsController extends Controller
         $page_type_string = "";
         if (trim($page_type) != "") {
             if ($page_type == "unmonitored") {
-                $page_type_string = "AND monitored = 0";
+                $page_type_string = "AND i.monitored = 0";
             } else {
-                $page_type_string = "AND monitored = 1 AND i.type = :type ";
+                $page_type_string = "AND i.monitored = 1 AND i.type = :type ";
             }
         }
 
         $sql = "
             SELECT 
-                i.sku AS sku,
-                i.product_name AS product_name,
-                dfi.report_date AS date, 
-                s.invoice_no,
-                si.qty_sold,
-                si.cost_per_unit,
-                si.price_per_unit,
-                COALESCE(dfi.puhunan, 0) AS puhunan,
-                COALESCE(dfi.tubo, 0) AS tubo,
-                COALESCE(dfi.total_sales, 0) AS total_sales
-            FROM daily_financial_snapshots AS dfi
-            LEFT JOIN inventory AS i
-                ON i.id = dfi.inventory_id
+                *,
+                si.total AS total_sales,
+                (si.qty_sold * si.cost_per_unit) AS puhunan,
+                si.total - (si.qty_sold * si.cost_per_unit) AS tubo,
+                si.total AS total
+            FROM sales as s
             LEFT JOIN sales_items as si
-                ON si.id = dfi.source_item_id
-            LEFT JOIN sales as s
-                ON si.sales_id = s.id
-            WHERE dfi.inventory_id != 0 AND dfi.report_date = '$date' ".$page_type_string."  
-            ORDER BY dfi.source_item_id ASC;
+                ON s.id = si.sales_id
+            LEFT JOIN inventory AS i
+                ON i.id = si.inventory_id 
+            WHERE s.date_sold = '$date' ".$page_type_string." AND s.status = 'approved' AND s.is_paid = 'yes'
+            ORDER BY si.id ASC;
         ";
 
         $sql_query = Yii::$app->db->createCommand($sql);
@@ -533,10 +526,12 @@ class ReportsController extends Controller
         $totalPuhunan = 0;
         $totalTubo = 0;
         $totalSales = 0;
+        $totalQuantity = 0;
         foreach ($data as $item) {
             $totalPuhunan += (float)$item['puhunan'];
             $totalTubo += (float)$item['tubo'];
-            $totalSales += (float)$item['total_sales'];
+            $totalSales += (float)$item['total'];
+            $totalQuantity += (float)$item['qty_sold'];
         }
 
         return [
@@ -546,6 +541,7 @@ class ReportsController extends Controller
             'total_puhunan' => $totalPuhunan,
             'total_tubo' => $totalTubo,
             'total_sales' => $totalSales,
+            'total_quantity' => $totalQuantity,
             'items' => $data,
         ];
     }
@@ -712,6 +708,13 @@ class ReportsController extends Controller
         ];
         array_splice($tableHeader, 5, 0, $additionalHeader);
 
+        $prefixed_string = "";
+        $array = ['apple', 'banana', 'orange'];
+        $prefixed_array = array_map(function($item) { return 'ex_' . $item; }, $monitoredIds);
+        $prefixed_string = implode(", ", $prefixed_array);
+        $prefixed_array = array_map(function($item) { return 'ex_' . $item . '_details'; }, $monitoredIds);
+        $prefixed_string = ", " . $prefixed_string . ", " . implode(", ", $prefixed_array);
+
         $sql = "
             SELECT 
                 s.date_sold AS date, 
@@ -728,7 +731,7 @@ class ReportsController extends Controller
                 dbl.money_on_hand AS money_on_hand,
                 dbl.total_puhunan AS total_puhunan,
                 dbl.total_tubo AS total_tubo,
-                dbl.id
+                dbl.id" . $prefixed_string . "
             FROM sales AS s
             LEFT JOIN daily_business_ledger AS dbl
                 ON s.date_sold = dbl.report_date 
@@ -743,7 +746,12 @@ class ReportsController extends Controller
         $data = Yii::$app->db->createCommand($sql)->queryAll();
 
         $monitoredItems = [];
-        $sqlMonitoredItem = "SELECT * FROM daily_financial_snapshots WHERE inventory_id IN (".implode(",", $monitoredIds).")";
+        $sqlMonitoredItem = "
+            SELECT * FROM daily_financial_snapshots AS dfs
+            LEFT JOIN inventory AS i 
+            ON i.id = dfs.inventory_id
+            WHERE i.id IN (".implode(",", $monitoredIds).")
+        ";
         $query = Yii::$app->db->createCommand($sqlMonitoredItem)->queryAll();
         $previous_array = [];
         $query_mi = [];
@@ -775,12 +783,14 @@ class ReportsController extends Controller
 
                 // $query_mi[] = "SELECT * FROM monitored_items WHERE ledger_id = :ledger_id".$data[$key]["id"]." | ".$child["inventory_id"];
                 // Yii::$app->db->createCommand("")->bindValue(':ledger_id', $data[$key]["id"])->queryOne();
-                $data[$key]["ex_".$child["inventory_id"]] = 0 ;
+                // $data[$key]["ex_".$child["inventory_id"]] = 0 ;
 
                 if ($parent["date"] == $child["report_date"]." 00:00:00") {
-                    $data[$key]["p_".$child["inventory_id"]] = $child["puhunan"];
-                    $data[$key]["t_".$child["inventory_id"]] = $child["tubo"];
-                    $data[$key]["ts_".$child["inventory_id"]] = $child["total_sales"];
+                    $data[$key]["p_".$child["inventory_id"]] = ($data[$key]["p_".$child["inventory_id"]] ?? 0) + $child["puhunan"];
+                    $data[$key]["t_".$child["inventory_id"]] = ($data[$key]["t_".$child["inventory_id"]] ?? 0) + $child["tubo"];
+                    $data[$key]["ts_".$child["inventory_id"]] = ($data[$key]["ts_".$child["inventory_id"]] ?? 0) + $child["total_sales"];
+                    $data[$key]["pn_".$child["inventory_id"]] = $child["product_name"];
+                    $data[$key]["i_".$child["inventory_id"]] = $child["product_name"];
 
                     $data[$key]["puhunan"] = (float) $data[$key]["puhunan"] - (float) $child["puhunan"];
                     $data[$key]["tubo"] = (float) $data[$key]["tubo"] - (float) $child["tubo"];
@@ -813,9 +823,9 @@ class ReportsController extends Controller
             $data[$key]["total_tubo_str"] = $data[$key]["total_tubo_str"] . " + " . $data[$key]["tubo"] . " - " . $data[$key]["bahay"];
 
             if ($data[$key]["total_sales"] == 0) {
-                $data[$key]["money_on_hand"] = 0;
-                $data[$key]["total_puhunan"] = 0;
-                $data[$key]["total_tubo"] = 0;
+                // $data[$key]["money_on_hand"] = 0;
+                // $data[$key]["total_puhunan"] = 0;
+                // $data[$key]["total_tubo"] = 0;
                 $data[$key]["money_on_hand_str"] = "";
                 $data[$key]["total_puhunan_str"] = "";
                 $data[$key]["total_tubo_str"] = "";
@@ -833,9 +843,9 @@ class ReportsController extends Controller
         }
 
         return [
+            'data' => $data,
             'query_mi' => $query_mi,
             'monitored_items' => $dataInventory,
-            'data' => $data,
             'count' => count($data),
             'previous_array' => $previous_array,
             'mids' => $dataInventory,
@@ -888,6 +898,7 @@ class ReportsController extends Controller
 
         try {
             // 4. Execute the update query using parameters
+            $save_type = ($save_type == "bahay" || $save_type == "hardware") ? $save_type : "ex_" . $save_type ;
             $sql = "UPDATE daily_business_ledger SET ".$save_type." = :amount, ".$save_type."_details = :details WHERE id = :id";
 
             $rowsAffected = Yii::$app->db->createCommand($sql)
