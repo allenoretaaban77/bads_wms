@@ -502,18 +502,39 @@ class ReportsController extends Controller
         $sql = "
             SELECT 
                 *,
-                si.total AS total_sales,
-                (si.qty_sold * si.cost_per_unit) AS puhunan,
-                si.total - (si.qty_sold * si.cost_per_unit) AS tubo,
-                si.total AS total
-            FROM sales as s
-            LEFT JOIN sales_items as si
-                ON s.id = si.sales_id
+                SUM(si.qty_sold) AS qty_sold,
+                SUM(si.total) AS total_sales,
+                SUM(si.puhunan) AS puhunan,
+                SUM(si.tubo) AS tubo,
+                SUM(si.total) AS total
+            FROM sales_items as si
             LEFT JOIN inventory AS i
                 ON i.id = si.inventory_id 
+            CROSS JOIN sales as s
+                ON s.id = si.sales_id
             WHERE s.date_sold = '$date' ".$page_type_string." AND s.status = 'approved' AND s.is_paid = 'yes'
+            GROUP BY si.inventory_id, si.saved_id
             ORDER BY si.id ASC;
         ";
+
+        // $sql = "
+        //     SELECT 
+        //         *,
+        //         si.qty_sold AS qty_sold,
+        //         si.total AS total_sales,
+        //         si.puhunan AS puhunan,
+        //         si.tubo AS tubo,
+        //         -- (si.qty_sold * si.cost_per_unit) AS puhunan,
+        //         -- si.total - (si.qty_sold * si.cost_per_unit) AS tubo,
+        //         si.total AS total
+        //     FROM sales_items as si
+        //     LEFT JOIN inventory AS i
+        //         ON i.id = si.inventory_id 
+        //     CROSS JOIN sales as s
+        //         ON s.id = si.sales_id
+        //     WHERE s.date_sold = '$date' ".$page_type_string." AND s.status = 'approved' AND s.is_paid = 'yes'
+        //     ORDER BY si.id ASC;
+        // ";
 
         $sql_query = Yii::$app->db->createCommand($sql);
         if (trim($page_type) != "") {

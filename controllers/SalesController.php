@@ -82,7 +82,7 @@ class SalesController extends Controller
                 ->from('sales_items')
                 ->where('sales_id = sales.id'),
             'item_count' => (new \yii\db\Query())
-                ->select('COUNT(*)')
+                ->select('COUNT(DISTINCT saved_id)')
                 ->from('sales_items')
                 ->where('sales_id = sales.id')
         ]);
@@ -202,10 +202,13 @@ class SalesController extends Controller
                 'sku' => 'i.sku',
                 'i.tracking_method',
                 'sales_items.inventory_id',
+                'sales_items.saved_id AS saved_id',
                 'sales_items.price_per_unit AS price',
                 'sales_items.cost_per_unit AS cost',
-                'sales_items.qty_sold AS qty_sold',
-                'sales_items.total AS total',
+                // 'sales_items.qty_sold AS qty_sold',
+                // 'sales_items.total AS total',
+                'SUM(sales_items.qty_sold) AS qty_sold',
+                'SUM(sales_items.total) AS total',
                 'b.current_qty AS current_qty',
                 // 'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold', 
                 // 'SUM(COALESCE(sales_items.total, 0)) AS total', 
@@ -214,7 +217,7 @@ class SalesController extends Controller
             ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
             ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
             ->where(['sales_items.sales_id' => $id])
-            // ->groupBy(['sales_items.inventory_id'])
+            ->groupBy(['sales_items.saved_id'])
             ->orderBy(['sales_items.id' => SORT_ASC])
             ->asArray()
             ->all();
@@ -240,7 +243,8 @@ class SalesController extends Controller
                     ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
                     ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
                     ->where(['sales_items.sales_id' => $id])
-                    ->andWhere(['sales_items.inventory_id' => $item['inventory_id']])
+                    ->andWhere(['sales_items.saved_id' => $item['saved_id']])
+                    // ->andWhere(['sales_items.qty_sold' => $item['qty_sold']])
                     ->asArray()
                     ->all();
                 $item['allocated_batches'] = $allocated_batches;
@@ -285,16 +289,16 @@ class SalesController extends Controller
                 'reorder_level' => 'i.reorder_level',
                 'cost_per_unit' => 'i.cost_per_unit',
                 'sku' => 'i.sku',
-                'sales_items.qty_sold AS qty_sold',
-                'sales_items.total AS total',
+                // 'sales_items.qty_sold AS qty_sold',
+                // 'sales_items.total AS total',
                 'sales_items.price_per_unit AS price_per_unit',
                 // 'SUM(COALESCE(sales_items.qty_sold, 0)) AS qty_sold',
+                'SUM(sales_items.qty_sold) AS qty_sold',
+                'SUM(sales_items.total) AS total',
                 // 'SUM(COALESCE(sales_items.total, 0)) AS total',  
             ])
             ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
-            // ->groupBy([
-            //     'i.product_name'
-            // ])
+            ->groupBy(['sales_items.saved_id'])
             ->where(['sales_id' => $id])
             ->orderBy(['sales_items.id' => SORT_ASC])
             ->asArray()
@@ -391,11 +395,11 @@ class SalesController extends Controller
 
                     // Verify sum of allocations matches frontend totals
                     $sumAllocated = (float)array_sum(array_column($allocatedBatches, 'quantity_out'));
-                    if ($sumAllocated !== $totalQtySold) {
-                        $transaction->rollBack();
-                        Yii::$app->response->statusCode = 422;
-                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
-                    }
+                    // if ($sumAllocated !== $totalQtySold) {
+                    //     $transaction->rollBack();
+                    //     Yii::$app->response->statusCode = 422;
+                    //     return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
+                    // }
 
                     // Process manual batch allocations
                     foreach ($allocatedBatches as $allocated) {
@@ -410,7 +414,7 @@ class SalesController extends Controller
                         }
 
                         // Save line-item linked directly to this custom batch assignment
-                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit);
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit, $itemData['saved_id']);
                     }
 
                 } elseif ($inventory->tracking_method === 'standard') {
@@ -449,7 +453,7 @@ class SalesController extends Controller
 
                         // 🌟 Saves perfectly for BOTH draft and approved! 
                         // For draft, it assigns the expected batch_id without touching inventory counters.
-                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit, $itemData['saved_id']);
                         
                         $remainderToDeduct -= $deductionAmount;
                     }
@@ -486,7 +490,7 @@ class SalesController extends Controller
     /**
      * Helper utility function to save individual sales lines cleanly
      */
-    private function saveSalesItemRow($salesId, $inventoryId, $batchId, $qty, $price, $cost)
+    private function saveSalesItemRow($salesId, $inventoryId, $batchId, $qty, $price, $cost, $saved_id)
     {
         $salesItem = new SalesItems();
         $salesItem->sales_id = $salesId;
@@ -495,6 +499,7 @@ class SalesController extends Controller
         $salesItem->qty_sold = $qty;
         $salesItem->price_per_unit = $price;
         $salesItem->cost_per_unit = $cost;
+        $salesItem->saved_id = $saved_id;
 
         if (!$salesItem->save()) {
             throw new \yii\db\Exception("Failed saving line row properties: " . json_encode($salesItem->getErrors()));
@@ -583,6 +588,20 @@ class SalesController extends Controller
                     return ['error' => 'Validation failed', 'errors' => ['items' => ['Invalid price: '.$inventory->product_name]]];
                 }
 
+                // $payloadKey = $inventory->id . '-' . $pricePerUnit;
+                // if (isset($processedPairs[$payloadKey])) {
+                //     $transaction->rollBack();
+                //     Yii::$app->response->statusCode = 422;
+                //     return [
+                //         'success' => false,
+                //         'message' => 'Validation failed.',
+                //         'errors' => [
+                //             'items' => ["Duplicate Row Blocked: Product has same price for {$inventory->product_name} [{$inventory->sku}] exists. "]
+                //         ]
+                //     ];
+                // }
+                // $processedPairs[$payloadKey] = true;
+
                 // 2. Fork Flow based on Tracking Method (Draft-only behavior)
                 if ($inventory->tracking_method === 'batch_monitored') {
                     
@@ -595,11 +614,11 @@ class SalesController extends Controller
 
                     // Verify sum of allocations matches frontend totals
                     $sumAllocated = (float) array_sum(array_column($allocatedBatches, 'quantity_out'));
-                    if ($sumAllocated !== $totalQtySold) {
-                        $transaction->rollBack();
-                        Yii::$app->response->statusCode = 422;
-                        return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
-                    }
+                    // if ($sumAllocated !== $totalQtySold) {
+                    //     $transaction->rollBack();
+                    //     Yii::$app->response->statusCode = 422;
+                    //     return ['error' => 'Validation failed', 'errors' => ['items' => ["Allocated batch quantities ({$sumAllocated}) do not equal total line quantity ({$totalQtySold}) for '{$inventory->product_name}'."]]];
+                    // }
 
                     // Process manual batch allocations for draft
                     foreach ($allocatedBatches as $allocated) {
@@ -613,7 +632,7 @@ class SalesController extends Controller
                         }
 
                         // Save line-item linked directly to this custom batch assignment without touching counters
-                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit);
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batchId, $qtyOut, $pricePerUnit, $costPerUnit, $itemData['saved_id']);
                     }
 
                 } elseif ($inventory->tracking_method === 'standard') {
@@ -648,7 +667,7 @@ class SalesController extends Controller
                         $costPerUnit = (float)$batch->cost_per_unit;
 
                         // Assign expected batch parameters safely
-                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+                        $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit, $itemData['saved_id']);
                         
                         $remainderToDeduct -= $deductionAmount;
                     }
@@ -837,7 +856,7 @@ class SalesController extends Controller
                             $inventory->save(false);
 
                             // Write the synchronized finalized line item using the exact user-defined price point
-                            $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit);
+                            $this->saveSalesItemRow($sales->id, $inventory->id, $batch->id, $deductionAmount, $pricePerUnit, $costPerUnit, $line->saved_id);
 
                             $remainderToDeduct -= $deductionAmount;
 
