@@ -515,7 +515,7 @@ class ReportsController extends Controller
             CROSS JOIN sales as s
                 ON s.id = si.sales_id
             WHERE s.date_sold = '$date' ".$page_type_string." AND s.status = 'approved' AND s.is_paid = 'yes'
-            GROUP BY si.inventory_id, si.saved_id
+            GROUP BY si.sales_id, si.saved_id
             ORDER BY si.id ASC;
         ";
 

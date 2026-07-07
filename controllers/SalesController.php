@@ -281,9 +281,10 @@ class SalesController extends Controller
             return ['success' => false, 'error' => 'Sales transaction not found'];
         }
 
+        $items = [];
         $items = SalesItems::find()
             ->select([
-                'sales_items.*',
+                // 'sales_items.*',
                 'product_name' => 'i.product_name',
                 // 'current_qty' => 'inventory.current_qty',
                 'reorder_level' => 'i.reorder_level',
