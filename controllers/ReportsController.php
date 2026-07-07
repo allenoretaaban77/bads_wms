@@ -500,13 +500,15 @@ class ReportsController extends Controller
         }
 
         $sql = "
-            SELECT 
-                *,
+            SELECT
+                i.product_name,
+                si.price_per_unit,
                 SUM(si.qty_sold) AS qty_sold,
                 SUM(si.total) AS total_sales,
                 SUM(si.puhunan) AS puhunan,
                 SUM(si.tubo) AS tubo,
-                SUM(si.total) AS total
+                SUM(si.total) AS total,
+                s.invoice_no
             FROM sales_items as si
             LEFT JOIN inventory AS i
                 ON i.id = si.inventory_id 
