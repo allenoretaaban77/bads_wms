@@ -7,4 +7,4 @@ echo Updating Badong's Inventory System...
 echo Do not close this window while using the application.
 echo ----------------------------------------------------
 
-npm run build
+git pull
