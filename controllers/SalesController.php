@@ -218,7 +218,7 @@ class SalesController extends Controller
             ->leftJoin('inventory_batches b', 'b.id = sales_items.batch_id')
             ->where(['sales_items.sales_id' => $id])
             ->groupBy(['sales_items.saved_id'])
-            ->orderBy(['sales_items.id' => SORT_ASC])
+            ->orderBy(['sales_items.saved_id' => SORT_ASC])
             ->asArray()
             ->all();
 
@@ -301,7 +301,7 @@ class SalesController extends Controller
             ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
             ->groupBy(['sales_items.saved_id'])
             ->where(['sales_id' => $id])
-            ->orderBy(['sales_items.id' => SORT_ASC])
+            ->orderBy(['sales_items.saved_id' => SORT_ASC])
             ->asArray()
             ->all();
 
@@ -871,6 +871,18 @@ class SalesController extends Controller
                     }
                 }
             }
+
+            // $sql = "
+            //     UPDATE sales_items si
+            //     JOIN (
+            //         SELECT 
+            //             id,
+            //             ROW_NUMBER() OVER (PARTITION BY sales_id ORDER BY id) as seq
+            //         FROM sales_items
+            //         ORDER BY saved_id ASC
+            //     ) r ON si.id = r.id
+            //     SET si.saved_id = r.seq;
+            // ";
 
             // Write validation action event parameters cleanly into audit database logs
             Yii::$app->db->createCommand()->insert('audit_log', [
