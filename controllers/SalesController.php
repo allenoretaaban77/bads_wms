@@ -297,6 +297,8 @@ class SalesController extends Controller
                 'SUM(sales_items.qty_sold) AS qty_sold',
                 'SUM(sales_items.total) AS total',
                 // 'SUM(COALESCE(sales_items.total, 0)) AS total',  
+                'saved_id',
+                'old_saved_id'
             ])
             ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
             ->groupBy(['sales_items.saved_id'])
@@ -1445,6 +1447,46 @@ class SalesController extends Controller
             Yii::$app->response->statusCode = 500;
             return ['success' => false, 'error' => $e->getMessage()];
         }
+    }
+
+    public function actionUpdateSorting()
+    {
+        if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $sales_id = Yii::$app->request->getBodyParam('sales_id');
+        $items    = Yii::$app->request->getBodyParam('items');
+
+        $sale = SalesItems::findOne(['sales_id' => $sales_id]);
+        if (!$sale) {
+            Yii::$app->response->statusCode = 404;
+            return ['error' => 'Sale id not found'];
+        }
+
+        $oldData = $sale->attributes;
+
+        $sale->is_paid    = $isPaid;
+        $sale->updated_by = $updatedBy;
+
+        if (!$sale->save()) {
+            Yii::$app->response->statusCode = 500;
+            return ['error' => 'Failed to update sale'];
+        }
+
+        // ✅ Audit log entry
+        // Yii::$app->db->createCommand()->insert('audit_log', [
+        //     'entity'      => 'sales',
+        //     'entity_id'   => $sale->id,
+        //     'action'      => 'set_paid_unpaid',
+        //     'old_data'    => json_encode($oldData),
+        //     'new_data'    => json_encode($sale->attributes),
+        //     'updated_by'  => $updatedBy,
+        //     'updated_at'  => date('Y-m-d H:i:s'),
+        // ])->execute();
+
+        return ['success' => true, 'data' => $sale];
     }
 
 

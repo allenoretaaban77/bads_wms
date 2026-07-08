@@ -36,8 +36,8 @@ class InventoryBatches extends \yii\db\ActiveRecord
     {
         return [
             [['inventory_id', 'cost_per_unit', 'initial_qty', 'current_qty'], 'required'],
-            [['inventory_id', 'initial_qty', 'current_qty'], 'integer'],
-            [['cost_per_unit'], 'number'],
+            [['inventory_id'], 'integer'],
+            [['cost_per_unit',  'initial_qty', 'current_qty'], 'number'],
             [['date_received'], 'safe'],
             [['inventory_id'], 'exist', 'skipOnError' => true, 'targetClass' => Inventory::class, 'targetAttribute' => ['inventory_id' => 'id']],
         ];
