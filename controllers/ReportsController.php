@@ -516,7 +516,7 @@ class ReportsController extends Controller
                 ON s.id = si.sales_id
             WHERE s.date_sold = '$date' ".$page_type_string." AND s.status = 'approved' AND s.is_paid = 'yes'
             GROUP BY si.sales_id, si.saved_id
-            ORDER BY si.id ASC;
+            ORDER BY si.saved_id ASC;
         ";
 
         // $sql = "
