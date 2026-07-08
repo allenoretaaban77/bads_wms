@@ -503,6 +503,7 @@ class SalesController extends Controller
         $salesItem->price_per_unit = $price;
         $salesItem->cost_per_unit = $cost;
         $salesItem->saved_id = $saved_id;
+        $salesItem->old_saved_id = $saved_id;
 
         if (!$salesItem->save()) {
             throw new \yii\db\Exception("Failed saving line row properties: " . json_encode($salesItem->getErrors()));
@@ -1449,7 +1450,7 @@ class SalesController extends Controller
         }
     }
 
-    public function actionUpdateSorting()
+    public function actionUpdatesorting()
     {
         if (Yii::$app->request->method !== 'PUT' && Yii::$app->request->method !== 'PATCH') {
             Yii::$app->response->statusCode = 405;
@@ -1458,36 +1459,80 @@ class SalesController extends Controller
 
         $sales_id = Yii::$app->request->getBodyParam('sales_id');
         $items    = Yii::$app->request->getBodyParam('items');
+        if (!$sales_id || empty($items) || !is_array($items)) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Missing or invalid parameters'];
+        }
 
-        $sale = SalesItems::findOne(['sales_id' => $sales_id]);
-        if (!$sale) {
+        $exists = SalesItems::find()->where(['sales_id' => $sales_id])->exists();
+        if (!$exists) {
             Yii::$app->response->statusCode = 404;
-            return ['error' => 'Sale id not found'];
+            return ['error' => "Sale ID {$sales_id} not found"];
         }
 
-        $oldData = $sale->attributes;
+        $transaction = Yii::$app->db->beginTransaction();
 
-        $sale->is_paid    = $isPaid;
-        $sale->updated_by = $updatedBy;
+        try {
+            foreach ($items as $item) {
+                $old_saved_id = $item['old_saved_id'] ?? null;
+                $new_saved_id = $item['saved_id'] ?? null;
 
-        if (!$sale->save()) {
+                // Skip or throw an error if the payload structure is malformed
+                if ($old_saved_id === null || $new_saved_id === null) {
+                    throw new \Exception("Malformed item data: missing old_saved_id or saved_id.");
+                }
+
+                // Perform batch update on specific matching rows
+                SalesItems::updateAll(
+                    ['saved_id' => $new_saved_id], // Columns to update
+                    ['sales_id' => $sales_id, 'old_saved_id' => $old_saved_id] // WHERE conditions
+                );
+            }
+
+            // Commit changes if everything goes smoothly
+            $transaction->commit();
+
+            $sql_resort_old_saved_id = "UPDATE sales_items AS si SET si.old_saved_id = si.saved_id WHERE sales_id = :sales_id";
+            Yii::$app->db->createCommand($sql_resort_old_saved_id)->bindValue(':sales_id', $sales_id)->execute();
+
+            $items = [];
+            $items = SalesItems::find()
+                ->select([
+                    'product_name' => 'i.product_name',
+                    'reorder_level' => 'i.reorder_level',
+                    'cost_per_unit' => 'i.cost_per_unit',
+                    'sku' => 'i.sku',
+                    'sales_items.price_per_unit AS price_per_unit',
+                    'SUM(sales_items.qty_sold) AS qty_sold',
+                    'SUM(sales_items.total) AS total', 
+                    'saved_id',
+                    'old_saved_id'
+                ])
+                ->leftJoin('inventory i', 'i.id = sales_items.inventory_id')
+                ->groupBy(['sales_items.saved_id'])
+                ->where(['sales_id' => $sales_id])
+                ->orderBy(['sales_items.saved_id' => SORT_ASC])
+                ->asArray()
+                ->all();
+
+
+            
+            return [
+                'items' => $items,
+                'success' => true, 
+                'message' => 'Sorting updated successfully for sales_id ' . $sales_id
+            ];
+
+        } catch (\Exception $e) {
+            // Rollback database changes if any single update fails
+            $transaction->rollBack();
+            
             Yii::$app->response->statusCode = 500;
-            return ['error' => 'Failed to update sale'];
+            return [
+                'error' => 'Failed to update sale items sorting', 
+                'details' => $e->getMessage()
+            ];
         }
-
-        // ✅ Audit log entry
-        // Yii::$app->db->createCommand()->insert('audit_log', [
-        //     'entity'      => 'sales',
-        //     'entity_id'   => $sale->id,
-        //     'action'      => 'set_paid_unpaid',
-        //     'old_data'    => json_encode($oldData),
-        //     'new_data'    => json_encode($sale->attributes),
-        //     'updated_by'  => $updatedBy,
-        //     'updated_at'  => date('Y-m-d H:i:s'),
-        // ])->execute();
-
-        return ['success' => true, 'data' => $sale];
     }
-
 
 }
