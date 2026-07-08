@@ -1515,8 +1515,6 @@ class SalesController extends Controller
                 ->asArray()
                 ->all();
 
-
-            
             return [
                 'items' => $items,
                 'success' => true, 
