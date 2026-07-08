@@ -379,9 +379,9 @@ class ReportsController extends Controller
         $tableHeader = [
             ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
             ["title"=>"Date","name"=>"date","align"=>"left"],
+            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right"],
             ["title"=>"Puhunan","name"=>"puhunan","align"=>"right"],
             ["title"=>"Tubo","name"=>"tubo","align"=>"right"],
-            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right"],
             ["title"=>"Action","name"=>"action","default"=>1],
         ];
 
