@@ -868,7 +868,7 @@ class ReportsController extends Controller
             Yii::$app->db->createCommand($sqlUpdateLedger)->bindValue(':target_date', $parent["date"])->execute();
         }
 
-        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
         $totalTubo = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
         $totalSales = (object) Yii::$app->db->createCommand("SELECT SUM(total_sales) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
 
@@ -878,11 +878,11 @@ class ReportsController extends Controller
         $totalPuhunanRSB = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id IN (1421,1422,1423)")->queryOne();
         $totalTuboRSB = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id IN (1421,1422,1423)")->queryOne();
 
-        $totalPuhunanAll = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
-        $totalTuboAll = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_business_ledger")->queryOne();
+        // $totalPuhunanAll = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
+        // $totalTuboAll = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_business_ledger")->queryOne();
 
-        $totalPuhunanAll->amount = $totalPuhunan->amount;
-        $totalTuboAll->amount = $totalTubo->amount;
+        $totalPuhunanAll = $totalPuhunan->amount;
+        $totalTuboAll = $totalTubo->amount;
 
         $totalPuhunan->amount = $totalPuhunan->amount - ($totalPuhunanCement->amount + $totalPuhunanRSB->amount);
         $totalTubo->amount = $totalTubo->amount - ($totalTuboCement->amount + $totalTuboRSB->amount);
@@ -905,8 +905,8 @@ class ReportsController extends Controller
             'totalTuboCement' => $totalTuboCement->amount,
             'totalPuhunanRSB' => $totalPuhunanRSB->amount,
             'totalTuboRSB' => $totalTuboRSB->amount,
-            'totalPuhunanAll' => $totalPuhunanAll->amount,
-            'totalTuboAll' => $totalTuboAll->amount,
+            'totalPuhunanAll' => 0,
+            'totalTuboAll' => $totalTuboAll,
         ];       
     }
 
