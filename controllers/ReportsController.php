@@ -865,6 +865,10 @@ class ReportsController extends Controller
             Yii::$app->db->createCommand($sqlUpdateLedger)->bindValue(':target_date', $parent["date"])->execute();
         }
 
+        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
+        $totalTubo = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_business_ledger")->queryOne();
+        $totalSales = (object) Yii::$app->db->createCommand("SELECT SUM(total_sales) AS amount FROM daily_business_ledger")->queryOne();
+
         return [
             'data' => $data,
             'query_mi' => $query_mi,
@@ -874,7 +878,14 @@ class ReportsController extends Controller
             'mids' => $dataInventory,
             'sqlMonitoredItem' => $sqlMonitoredItem,
             'success' => true,
-            'headers' => json_encode($tableHeader)
+            'headers' => json_encode($tableHeader),
+
+            'totalPuhunan' => $totalPuhunan->amount,
+            'totalTubo' => $totalTubo->amount,
+            'totalSales' => $totalSales->amount,
+            'totalCement' => 147,
+            'totalRSB' => 258,
+            'totalAll' => 369,
         ];       
     }
 
