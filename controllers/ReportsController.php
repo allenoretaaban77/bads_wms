@@ -404,8 +404,8 @@ class ReportsController extends Controller
         // ";
         // $data = Yii::$app->db->createCommand($sql)->queryAll();
 
-        $inventory_id = $request->get('inventory_id');
-        
+        $inventory_id = $request->get('inventoryId');
+
         $pageType = $request->get('pageType');
         $query_where = "";
 
@@ -422,6 +422,7 @@ class ReportsController extends Controller
                         AND s.is_paid = 'yes' 
                         AND i.monitored = 1
                         AND i.type = :type
+                        AND i.id = :inventory_id
                 ";
             }
         } else {
@@ -464,7 +465,7 @@ class ReportsController extends Controller
             if ($pageType == "unmonitored") {
                 $data = Yii::$app->db->createCommand($sql)->queryAll(); 
             } else {
-                $data = Yii::$app->db->createCommand($sql)->bindValue(':type', $pageType)->queryAll(); 
+                $data = Yii::$app->db->createCommand($sql)->bindValue(':type', $pageType)->bindValue(':inventory_id', $inventory_id)->queryAll(); 
             }
         } else {
             $data = Yii::$app->db->createCommand($sql)->queryAll(); 
