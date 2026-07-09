@@ -865,9 +865,24 @@ class ReportsController extends Controller
             Yii::$app->db->createCommand($sqlUpdateLedger)->bindValue(':target_date', $parent["date"])->execute();
         }
 
-        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
-        $totalTubo = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_business_ledger")->queryOne();
-        $totalSales = (object) Yii::$app->db->createCommand("SELECT SUM(total_sales) AS amount FROM daily_business_ledger")->queryOne();
+        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+        $totalTubo = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+        $totalSales = (object) Yii::$app->db->createCommand("SELECT SUM(total_sales) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+
+        $totalPuhunanCement = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id = 21")->queryOne();
+        $totalTuboCement = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id = 21")->queryOne();
+
+        $totalPuhunanRSB = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id IN (1421,1422,1423)")->queryOne();
+        $totalTuboRSB = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id IN (1421,1422,1423)")->queryOne();
+
+        $totalPuhunanAll = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+        $totalTuboAll = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+
+        $totalPuhunan->amount = $totalPuhunan->amount - ($totalPuhunanCement->amount + $totalPuhunanRSB->amount);
+        $totalTubo->amount = $totalTubo->amount - ($totalTuboCement->amount + $totalTuboRSB->amount);
+
+        // $totalPuhunanAll->amount = $totalPuhunan->amount - ($totalPuhunanCement->amount + $totalPuhunanRSB->amount);
+        // $totalTuboAll->amount = $totalTubo->amount - ($totalTuboCement->amount + $totalTuboRSB->amount);
 
         return [
             'data' => $data,
@@ -883,9 +898,12 @@ class ReportsController extends Controller
             'totalPuhunan' => $totalPuhunan->amount,
             'totalTubo' => $totalTubo->amount,
             'totalSales' => $totalSales->amount,
-            'totalCement' => 147,
-            'totalRSB' => 258,
-            'totalAll' => 369,
+            'totalPuhunanCement' => $totalPuhunanCement->amount,
+            'totalTuboCement' => $totalTuboCement->amount,
+            'totalPuhunanRSB' => $totalPuhunanRSB->amount,
+            'totalTuboRSB' => $totalTuboRSB->amount,
+            'totalPuhunanAll' => $totalPuhunanAll->amount,
+            'totalTuboAll' => $totalTuboAll->amount,
         ];       
     }
 
