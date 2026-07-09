@@ -878,14 +878,14 @@ class ReportsController extends Controller
         $totalPuhunanRSB = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id IN (1421,1422,1423)")->queryOne();
         $totalTuboRSB = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id IN (1421,1422,1423)")->queryOne();
 
-        $totalPuhunanAll = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
-        $totalTuboAll = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
+        $totalPuhunanAll = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
+        $totalTuboAll = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_business_ledger")->queryOne();
+
+        $totalPuhunanAll->amount = $totalPuhunan->amount;
+        $totalTuboAll->amount = $totalTubo->amount;
 
         $totalPuhunan->amount = $totalPuhunan->amount - ($totalPuhunanCement->amount + $totalPuhunanRSB->amount);
         $totalTubo->amount = $totalTubo->amount - ($totalTuboCement->amount + $totalTuboRSB->amount);
-
-        // $totalPuhunanAll->amount = $totalPuhunan->amount - ($totalPuhunanCement->amount + $totalPuhunanRSB->amount);
-        // $totalTuboAll->amount = $totalTubo->amount - ($totalTuboCement->amount + $totalTuboRSB->amount);
 
         return [
             'data' => $data,
