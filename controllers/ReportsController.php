@@ -404,6 +404,8 @@ class ReportsController extends Controller
         // ";
         // $data = Yii::$app->db->createCommand($sql)->queryAll();
 
+        $inventory_id = $request->get('inventory_id');
+        
         $pageType = $request->get('pageType');
         $query_where = "";
 
