@@ -868,7 +868,7 @@ class ReportsController extends Controller
             Yii::$app->db->createCommand($sqlUpdateLedger)->bindValue(':target_date', $parent["date"])->execute();
         }
 
-        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_business_ledger")->queryOne();
+        $totalPuhunan = (object) Yii::$app->db->createCommand("SELECT SUM(puhunan) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
         $totalTubo = (object) Yii::$app->db->createCommand("SELECT SUM(tubo) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
         $totalSales = (object) Yii::$app->db->createCommand("SELECT SUM(total_sales) AS amount FROM daily_financial_snapshots WHERE inventory_id != 0")->queryOne();
 
@@ -905,7 +905,7 @@ class ReportsController extends Controller
             'totalTuboCement' => $totalTuboCement->amount,
             'totalPuhunanRSB' => $totalPuhunanRSB->amount,
             'totalTuboRSB' => $totalTuboRSB->amount,
-            'totalPuhunanAll' => 0,
+            'totalPuhunanAll' => $totalPuhunanAll,
             'totalTuboAll' => $totalTuboAll,
         ];       
     }
