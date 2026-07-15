@@ -369,6 +369,16 @@ class ReplenishmentController extends Controller
                         return ['success' => false, 'errors' => $newBatch->getErrors()];
                     }
                 }
+
+                // update inventory cost if standard
+                if ($inventory->tracking_method == "standard") {
+                    $inventory->cost_per_unit = $itemData['cost_per_unit'];
+                    
+                    if (!$inventory->save(false)) {
+                        $transaction->rollBack();
+                        return ['success' => false, 'error' => "Failed to inventory cost for '{$inventory->product_name}'"];
+                    }
+                }
             }
 
             // 4. Insert into audit log
