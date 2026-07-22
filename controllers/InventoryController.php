@@ -1189,33 +1189,70 @@ class InventoryController extends Controller
         }
 
         $id = Yii::$app->request->getBodyParam('id');
-        $item = Inventory::findOne($id);
         $employee_id = Yii::$app->request->getBodyParam('employee_id');
+
+        $item = Inventory::findOne($id);
 
         if (!$item) {
             Yii::$app->response->statusCode = 404;
             return ['error' => 'Item not found'];
         }
 
+        // 🛑 1. Check if the item exists in sales_items before deleting
+        $hasSalesRecords = (new \yii\db\Query())
+            ->from('sales_items')
+            ->where(['inventory_id' => $id]) // Adjust column name if different
+            ->exists();
+
+        if ($hasSalesRecords) {
+            Yii::$app->response->statusCode = 409; // 409 Conflict
+            return ['success' => false, 'error' => 'Cannot delete item ['.$item['product_name'].' - '.$item['sku'].'] because it is associated with existing sales records.'];
+        }
+
         $oldData = $item->attributes; // Capture data before deletion
 
-        if (!$item->delete()) {
+        // 🔄 Begin transaction to ensure atomic execution
+        $transaction = Yii::$app->db->beginTransaction();
+
+        try {
+            // 🗑️ 2. Delete linked records from replenishment_items
+            Yii::$app->db->createCommand()->delete('replenishment_items', [
+                'inventory_id' => $id // Adjust column name if different
+            ])->execute();
+
+            // 🗑️ 3. Delete linked records from inventory_batches
+            Yii::$app->db->createCommand()->delete('inventory_batches', [
+                'inventory_id' => $id // Adjust column name if different
+            ])->execute();
+
+            // 🗑️ 4. Delete the main inventory item
+            if (!$item->delete()) {
+                throw new \Exception('Failed to delete inventory item');
+            }
+
+            // 📝 5. Insert into audit log
+            Yii::$app->db->createCommand()->insert('audit_log', [
+                'entity' => 'inventory',
+                'entity_id' => $id,
+                'action' => 'delete',
+                'old_data' => json_encode($oldData),
+                'new_data' => null,
+                'updated_by' => $employee_id,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ])->execute();
+
+            $transaction->commit();
+
+            return [
+                'success' => true, 
+                'message' => 'Item, associated batch records, and replenishment items deleted successfully'
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
             Yii::$app->response->statusCode = 500;
-            return ['error' => 'Failed to delete item'];
-        }    
-
-        // ✅ Insert into audit log after successful delete
-        Yii::$app->db->createCommand()->insert('audit_log', [
-            'entity' => 'inventory',
-            'entity_id' => $id,
-            'action' => 'delete',
-            'old_data' => json_encode($oldData),
-            'new_data' => null,
-            'updated_by' => $employee_id,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ])->execute();
-
-        return ['success' => true, 'message' => 'Item deleted successfully'];
+            return ['error' => 'Deletion failed: ' . $e->getMessage()];
+        }
     }
 
     public function actionChecksku()
