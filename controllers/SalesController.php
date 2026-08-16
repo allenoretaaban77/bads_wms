@@ -787,7 +787,7 @@ class SalesController extends Controller
                             Yii::$app->response->statusCode = 422;
                             return [
                                 'error' => 'Validation failed',
-                                'errors' => ['quantity_' . $inventory->id => ["Insufficient stock in assigned batch layer for '{$inventory->product_name}'. available: " . ($batch ? $batch->current_qty : 0)]]
+                                'errors' => ['items' => ["Insufficient stock in assigned batch layer for '{$inventory->product_name}'. Available: " . ($batch ? $batch->current_qty : 0)]]
                             ];
                         }
 

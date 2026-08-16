@@ -4,7 +4,7 @@ return [
     'class' => 'yii\db\Connection',
     'dsn' => 'mysql:host=localhost;dbname=bads_wms',
     'username' => 'root',
-    'password' => '',
+    'password' => 'aban1234',
     'charset' => 'utf8',
     'on afterOpen' => function($event) {
         $event->sender->createCommand("SET time_zone='+08:00'")->execute();
