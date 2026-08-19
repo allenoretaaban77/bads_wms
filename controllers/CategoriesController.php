@@ -119,6 +119,12 @@ class CategoriesController extends Controller
         // Execute query
         $totalCount = $query->count();
         $items = $query->offset($offset)->limit($pageSize)->asArray()->all();
+        $items = [[
+            'id'=>1, 
+            'name'=>'All',
+            'tag' =>'all',
+            'remarks' =>'System Generated'
+        ], ...$items];
 
         return [
             'success' => true,
