@@ -3,7 +3,7 @@
 namespace app\controllers;
 
 use Yii;
-use app\models\Suppliers;
+// use app\models\Sales;
 // use app\models\SalesItems;
 // use app\models\Inventory;
 // use app\models\InventoryBatches;
@@ -508,21 +508,6 @@ class ReportsController extends Controller
         ];        
     }
 
-    public function getPreviousLedger($date) 
-    {
-        // Clean up the date string (removing time stamp if it exists) to match DATE data type
-        $cleanDate = date('Y-m-d', strtotime($date));
-
-        $sql = "
-            SELECT * FROM `daily_business_ledger`
-            WHERE `report_date` < :selected_date 
-            ORDER BY `report_date` DESC
-            LIMIT 1;
-        ";
-
-        return Yii::$app->db->createCommand($sql)->bindValue(':selected_date', $cleanDate)->queryOne(); 
-    }
-
     public function actionGetdailybusinessledger() 
     {
         if (Yii::$app->request->method !== 'GET') {
@@ -735,6 +720,77 @@ class ReportsController extends Controller
         ];       
     }
 
+    public function getPreviousLedger($date) 
+    {
+        // Clean up the date string (removing time stamp if it exists) to match DATE data type
+        $cleanDate = date('Y-m-d', strtotime($date));
+
+        $sql = "
+            SELECT * FROM `daily_business_ledger`
+            WHERE `report_date` < :selected_date 
+            ORDER BY `report_date` DESC
+            LIMIT 1;
+        ";
+
+        return Yii::$app->db->createCommand($sql)->bindValue(':selected_date', $cleanDate)->queryOne(); 
+    }
+
+    public function actionUpdateledgervalue() 
+    {
+        // 1. Force JSON response format
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'PUT') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        // 2. Extract parameters from the POST body
+        $id = Yii::$app->request->getBodyParam('id');
+        $amount = Yii::$app->request->getBodyParam('amount');
+        $details = Yii::$app->request->getBodyParam('details');
+        $save_type = Yii::$app->request->getBodyParam('save_type');
+
+        // 3. Validation: Make sure the required fields exist
+        if (!$id) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'ID parameter is required'];
+        }
+        if ($amount === null || $details === null) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Both '.$save_type.' and '.$save_type.'_details are required'];
+        }
+
+        try {
+            // 4. Execute the update query using parameters
+            $save_type = ($save_type == "bahay" || $save_type == "hardware") ? $save_type : "ex_" . $save_type ;
+            $sql = "UPDATE daily_business_ledger SET ".$save_type." = :amount, ".$save_type."_details = :details WHERE id = :id";
+
+            $rowsAffected = Yii::$app->db->createCommand($sql)
+                ->bindValues([
+                    ':amount' => $amount,
+                    ':details' => $details,
+                    ':id' => $id,
+                ])
+                ->execute();
+
+            // 5. Return success status
+            return [
+                'success' => true,
+                'message' => 'Ledger updated successfully',
+                'rows_affected' => $rowsAffected
+            ];
+
+        } catch (\Exception $e) {
+            // Handle database errors gracefully without crashing the API
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'error' => 'Database error: ' . $e->getMessage()
+            ];
+        }
+    }
+
     public function actionUpdatereport() 
     {
         // 1. Force JSON response format (Standard practice for API endpoints in Yii2)
@@ -926,117 +982,955 @@ class ReportsController extends Controller
         }
     }
 
-    public function actionDeletereportmonthly()
+    public function actionUpdatereportmonthlyold()
     {
         Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
 
-        // Allow POST or DELETE requests
-        if (!in_array(Yii::$app->request->method, ['POST', 'DELETE'])) {
+        if (Yii::$app->request->method !== 'POST') {
             Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed. Use POST or DELETE.'];
+            return ['error' => 'Method not allowed'];
         }
 
-        $id = Yii::$app->request->getBodyParam('id');
-        $item = Suppliers::findOne($id);
-        
-        $employee_id = Yii::$app->request->getBodyParam('employee_id');
+        $runningMoneyHand = Yii::$app->request->getBodyParam('running_money_on_hand');
+        $runningTubo = Yii::$app->request->getBodyParam('running_tubo');
+        $runningPuhunan = Yii::$app->request->getBodyParam('running_puhunan');
+
         $inputDate = Yii::$app->request->getBodyParam('date');
         if (!$inputDate) {
             Yii::$app->response->statusCode = 400;
             return ['error' => 'Date parameter is required'];
         }
 
-        // Clean up input spacing
-        $cleanDate = trim($inputDate);
-
-        // Parse date formats: "MM, YYYY", "M, YYYY", or fallback to standard formats
-        $d = \DateTime::createFromFormat('m, Y',$cleanDate);
-        if (!$d) {
-            $d = \DateTime::createFromFormat('n, Y',$cleanDate);
-        }
-        
-        if (!$d) {
-            $time = strtotime($cleanDate);
-            if ($time !== false) {$d = new \DateTime();
-                $d->setTimestamp($time);
-            }
-        }
-
-        if (!$d) {
+        $time = strtotime($inputDate);
+        if ($time === false) {
             Yii::$app->response->statusCode = 400;
-            return ['error' => 'Invalid date format provided. Expected formats like "08, 2026" or "YYYY-MM"'];
+            return ['error' => 'Invalid date format provided'];
         }
 
-        // Normalize start date to the 1st day of the target month
-        $startDate =$d->format('Y-m-01');
-        
-        // Calculate the start of the next month for range-based deletion
-        $endDateTime = (clone$d)->modify('first day of next month');
-        $endDate =$endDateTime->format('Y-m-01');
+        $startDate = date('Y-m-01', $time);                        // e.g., '2026-08-01'
+        $endDate   = date('Y-m-01', strtotime('+1 month', $time)); // e.g., '2026-09-01'
 
         $transaction = Yii::$app->db->beginTransaction();
 
         try {
             // 1. Delete target month snapshots
-            $deletedSnapshots = Yii::$app->db->createCommand("                 
-                DELETE FROM daily_financial_snapshots_v2                 
-                WHERE report_date >= :start_date AND report_date < :end_date             
-            ")->bindValue(':start_date', $startDate)
-            ->bindValue(':end_date', $endDate)
-            ->execute();
+            $sqlDeleteSnapshots = "
+                DELETE FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date
+            ";
+            Yii::$app->db->createCommand($sqlDeleteSnapshots)
+                ->bindValue(':start_date', $startDate)
+                ->bindValue(':end_date', $endDate)
+                ->execute();
 
-            // 2. Delete daily business ledger records for the target month
-            $deletedDailyLedger = Yii::$app->db->createCommand("                 
-                DELETE FROM daily_business_ledger_v2                 
-                WHERE report_date >= :start_date AND report_date < :end_date             
-            ")->bindValue(':start_date', $startDate)
-            ->bindValue(':end_date', $endDate)
-            ->execute();
+            // 2. Insert itemized breakdown for target month
+            $sqlInsertSnapshots = "
+                INSERT INTO daily_financial_snapshots_v2
+                    (report_date, inventory_id, source_type, source_item_id, puhunan, tubo, total_sales, monitored)
+                SELECT 
+                    DATE(s.date_sold) AS report_date,
+                    si.inventory_id,
+                    'sale' AS source_type,
+                    si.id AS source_item_id,
+                    (si.qty_sold * si.cost_per_unit) AS puhunan,
+                    (si.total - (si.qty_sold * si.cost_per_unit)) AS tubo,
+                    si.total AS total_sales,
+                    i.monitored
+                FROM sales s
+                JOIN sales_items si ON s.id = si.sales_id
+                LEFT JOIN inventory i ON si.inventory_id = i.id
+                WHERE s.date_sold >= :start_date AND s.date_sold < :end_date
+                  AND s.status = 'approved' AND s.is_paid = 'yes'
+                ORDER BY s.date_sold ASC, si.id ASC
+                ON DUPLICATE KEY UPDATE 
+                    puhunan = VALUES(puhunan), 
+                    tubo = VALUES(tubo), 
+                    total_sales = VALUES(total_sales);
+            ";
+            Yii::$app->db->createCommand($sqlInsertSnapshots)
+                ->bindValue(':start_date', $startDate)
+                ->bindValue(':end_date', $endDate)
+                ->execute();
 
-            // 3. Delete monthly business ledger summary record
-            $deletedMonthlyLedger = Yii::$app->db->createCommand("
-                DELETE FROM monthly_business_ledger_v2
-                WHERE `date` = :start_date
+            // 3. Query daily aggregated sales from snapshots for target month
+            $dailyAggregates = Yii::$app->db->createCommand("
+                SELECT 
+                    report_date,
+                    SUM(puhunan) AS day_puhunan,
+                    SUM(tubo) AS day_tubo,
+                    SUM(total_sales) AS day_sales
+                FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date AND monitored = 0
+                GROUP BY report_date
+                ORDER BY report_date ASC
             ")->bindValue(':start_date', $startDate)
-            ->execute();
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            // Map sales aggregates by report_date for fast lookup
+            $salesByDate = [];
+            foreach ($dailyAggregates as $row) {
+                $salesByDate[$row['report_date']] = $row;
+            }
+
+            // 4. Loop day-by-day through the entire month
+            $currentTimestamp = strtotime($startDate);
+            $endTimestamp     = strtotime($endDate);
+
+            // Prepare UPSERT query (Insert if new date, Update financials if existing date)
+            $sqlUpsertDay = "
+                INSERT INTO daily_business_ledger_v2 (
+                    report_date, inventory_id, source_type, source_item_id,
+                    puhunan, tubo, total_sales,
+                    starting_puhunan, starting_tubo, starting_money_on_hand,
+                    total_puhunan, total_tubo, money_on_hand
+                ) VALUES (
+                    :report_date, 0, 'daily_summary', 0,
+                    :puhunan, :tubo, :total_sales,
+                    :starting_puhunan, :starting_tubo, :starting_money_on_hand,
+                    :total_puhunan, :total_tubo, :money_on_hand
+                )
+                ON DUPLICATE KEY UPDATE
+                    puhunan                = VALUES(puhunan),
+                    tubo                   = VALUES(tubo),
+                    total_sales            = VALUES(total_sales),
+                    starting_puhunan       = VALUES(starting_puhunan),
+                    starting_tubo          = VALUES(starting_tubo),
+                    starting_money_on_hand = VALUES(starting_money_on_hand),
+                    total_puhunan          = VALUES(total_puhunan),
+                    total_tubo             = VALUES(total_tubo),
+                    money_on_hand          = VALUES(money_on_hand);
+            ";
+
+            $cmdUpsertDay = Yii::$app->db->createCommand($sqlUpsertDay);
+
+            // Remove: $sqlDeleteLedger query execution completely! Do NOT delete ledger rows.
+
+            while ($currentTimestamp < $endTimestamp) {
+                $dateStr = date('Y-m-d', $currentTimestamp);
+
+                // Fetch day's sales from snapshots array
+                $daySales   = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_sales'] : 0.00;
+                $dayPuhunan = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_puhunan'] : 0.00;
+                $dayTubo    = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_tubo'] : 0.00;
+
+                // Set starting balances from previous day's ending totals
+                $startingPuhunan   = $runningPuhunan;
+                $startingTubo      = $runningTubo;
+                $startingMoneyHand = $runningMoneyHand;
+
+                // Accumulate ending totals
+                $runningPuhunan   += $dayPuhunan;
+                $runningTubo      += $dayTubo;
+                $runningMoneyHand += $daySales;
+
+                // Only update/insert days with active sales
+                if ($daySales != 0) {
+                    $cmdUpsertDay->bindValues([
+                        ':report_date'            => $dateStr,
+                        ':puhunan'                => $dayPuhunan,
+                        ':tubo'                   => $dayTubo,
+                        ':total_sales'            => $daySales,
+                        ':starting_puhunan'       => $startingPuhunan,
+                        ':starting_tubo'          => $startingTubo,
+                        ':starting_money_on_hand' => $startingMoneyHand,
+                        ':total_puhunan'          => $runningPuhunan,
+                        ':total_tubo'             => $runningTubo,
+                        ':money_on_hand'          => $runningMoneyHand,
+                    ])->execute();
+                }
+
+                // Advance to next day
+                $currentTimestamp = strtotime('+1 day', $currentTimestamp);
+            }
 
             $transaction->commit();
 
-            // ✅ Insert into audit log after successful delete
-            Yii::$app->db->createCommand()->insert('audit_log', [
-                'entity' => 'monthly report',
-                'entity_id' => $id,
-                'action' => 'delete',
-                'old_data' => json_encode($deletedMonthlyLedger),
-                'new_data' => null,
-                'updated_by' => $employee_id,
-                'updated_at' => date('Y-m-d H:i:s'),
-            ])->execute();
-
             return [
                 'success' => true,
-                'message' => 'Monthly ledger reports and daily records successfully deleted.',
+                'message' => 'Monthly ledger regenerated with rolling totals.',
                 'period'  => [
                     'start_date' => $startDate,
-                    'end_date'   => date('Y-m-d', strtotime('-1 day', strtotime($endDate))),
-                ],
-                'deleted_counts' => [
-                    'snapshots'      => $deletedSnapshots,
-                    'daily_ledger'   => $deletedDailyLedger,
-                    'monthly_ledger' => $deletedMonthlyLedger,
+                    'end_date'   => date('Y-m-d', strtotime('-1 day', $endTimestamp)),
                 ]
             ];
 
-        } catch (\Exception $e) {$transaction->rollBack();
+        } catch (\Exception $e) {
+            $transaction->rollBack();
             Yii::$app->response->statusCode = 500;
             return [
                 'success' => false,
-                'error'   => 'Failed to delete monthly ledger reports: ' . $e->getMessage()
+                'error'   => 'Failed to update ledger reports: ' . $e->getMessage()
             ];
         }
     }
 
-    public function formatMonthlyReportDate($inputDate) {
+    public function actionUpdatereportmonthlyOld2()
+    {
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $inputDate = Yii::$app->request->getBodyParam('date');
+        if (!$inputDate) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Date parameter is required'];
+        }
+
+        $time = strtotime($inputDate);
+        if ($time === false) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Invalid date format provided'];
+        }
+
+        $startDate = date('Y-m-01', $time);
+        $endDate   = date('Y-m-01', strtotime('+1 month', $time));
+
+        // Get initial running parameters or fetch automatically from previous day's record
+        $initialMoneyHand = Yii::$app->request->getBodyParam('running_money_on_hand');
+        $initialTubo      = Yii::$app->request->getBodyParam('running_tubo');
+        $initialPuhunan   = Yii::$app->request->getBodyParam('running_puhunan');
+
+        // Fallback: If not passed in request body, get ending balances from day prior to start_date
+        if ($initialMoneyHand === null || $initialTubo === null || $initialPuhunan === null) {
+            $prevDayLedger = Yii::$app->db->createCommand("
+                SELECT total_puhunan, total_tubo, money_on_hand 
+                FROM daily_business_ledger_v2 
+                WHERE report_date < :start_date 
+                ORDER BY report_date DESC 
+                LIMIT 1
+            ")->bindValue(':start_date', $startDate)->queryOne();
+
+            $runningPuhunan   = $prevDayLedger ? (float)$prevDayLedger['total_puhunan'] : 0.00;
+            $runningTubo      = $prevDayLedger ? (float)$prevDayLedger['total_tubo'] : 0.00;
+            $runningMoneyHand = $prevDayLedger ? (float)$prevDayLedger['money_on_hand'] : 0.00;
+        } else {
+            $runningPuhunan   = (float)$initialPuhunan;
+            $runningTubo      = (float)$initialTubo;
+            $runningMoneyHand = (float)$initialMoneyHand;
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+
+        try {
+            // 1. Clear monthly snapshots
+            Yii::$app->db->createCommand("
+                DELETE FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->execute();
+
+            // 2. Refresh itemized sales snapshots
+            Yii::$app->db->createCommand("
+                INSERT INTO daily_financial_snapshots_v2
+                    (report_date, inventory_id, source_type, source_item_id, puhunan, tubo, total_sales, monitored)
+                SELECT 
+                    DATE(s.date_sold) AS report_date,
+                    si.inventory_id,
+                    'sale' AS source_type,
+                    si.id AS source_item_id,
+                    (si.qty_sold * si.cost_per_unit) AS puhunan,
+                    (si.total - (si.qty_sold * si.cost_per_unit)) AS tubo,
+                    si.total AS total_sales,
+                    i.monitored
+                FROM sales s
+                JOIN sales_items si ON s.id = si.sales_id
+                LEFT JOIN inventory i ON si.inventory_id = i.id
+                WHERE s.date_sold >= :start_date AND s.date_sold < :end_date
+                  AND s.status = 'approved' AND s.is_paid = 'yes'
+                ORDER BY s.date_sold ASC, si.id ASC
+                ON DUPLICATE KEY UPDATE 
+                    puhunan = VALUES(puhunan), 
+                    tubo = VALUES(tubo), 
+                    total_sales = VALUES(total_sales);
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->execute();
+
+            // 3. Query unmonitored sales grouped per day
+            $dailyAggregates = Yii::$app->db->createCommand("
+                SELECT 
+                    report_date,
+                    SUM(puhunan) AS day_puhunan,
+                    SUM(tubo) AS day_tubo,
+                    SUM(total_sales) AS day_sales
+                FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date AND monitored = 0
+                GROUP BY report_date
+                ORDER BY report_date ASC
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            $salesByDate = [];
+            foreach ($dailyAggregates as $row) {
+                $salesByDate[$row['report_date']] = $row;
+            }
+
+            // 4. Chronological recalculation loop
+            $currentTimestamp = strtotime($startDate);
+            $endTimestamp     = strtotime($endDate);
+
+            $sqlUpsertDay = "
+                INSERT INTO daily_business_ledger_v2 (
+                    report_date, inventory_id, source_type, source_item_id,
+                    puhunan, tubo, total_sales,
+                    starting_puhunan, starting_tubo, starting_money_on_hand,
+                    total_puhunan, total_tubo, money_on_hand
+                ) VALUES (
+                    :report_date, 0, 'daily_summary', 0,
+                    :puhunan, :tubo, :total_sales,
+                    :starting_puhunan, :starting_tubo, :starting_money_on_hand,
+                    :total_puhunan, :total_tubo, :money_on_hand
+                )
+                ON DUPLICATE KEY UPDATE
+                    puhunan                = VALUES(puhunan),
+                    tubo                   = VALUES(tubo),
+                    total_sales            = VALUES(total_sales),
+                    starting_puhunan       = VALUES(starting_puhunan),
+                    starting_tubo          = VALUES(starting_tubo),
+                    starting_money_on_hand = VALUES(starting_money_on_hand),
+                    total_puhunan          = VALUES(total_puhunan),
+                    total_tubo             = VALUES(total_tubo),
+                    money_on_hand          = VALUES(money_on_hand);
+            ";
+
+            $cmdUpsertDay = Yii::$app->db->createCommand($sqlUpsertDay);
+
+            while ($currentTimestamp < $endTimestamp) {
+                $dateStr = date('Y-m-d', $currentTimestamp);
+
+                $daySales   = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_sales'] : 0.00;
+                $dayPuhunan = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_puhunan'] : 0.00;
+                $dayTubo    = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_tubo'] : 0.00;
+
+                // Set starting values for current day from previous iteration ending totals
+                $startingPuhunan   = $runningPuhunan;
+                $startingTubo      = $runningTubo;
+                $startingMoneyHand = $runningMoneyHand;
+
+                // Compute current day ending totals
+                $runningPuhunan   += $dayPuhunan;
+                $runningTubo      += $dayTubo;
+                $runningMoneyHand += $daySales;
+
+                // Always update/insert active sales days to maintain ledger continuity
+                if ($daySales > 0) {
+                    $cmdUpsertDay->bindValues([
+                        ':report_date'            => $dateStr,
+                        ':puhunan'                => $dayPuhunan,
+                        ':tubo'                   => $dayTubo,
+                        ':total_sales'            => $daySales,
+                        ':starting_puhunan'       => $startingPuhunan,
+                        ':starting_tubo'          => $startingTubo,
+                        ':starting_money_on_hand' => $startingMoneyHand,
+                        ':total_puhunan'          => $runningPuhunan,
+                        ':total_tubo'             => $runningTubo,
+                        ':money_on_hand'          => $runningMoneyHand,
+                    ])->execute();
+                }
+
+                $currentTimestamp = strtotime('+1 day', $currentTimestamp);
+            }
+
+            $transaction->commit();
+
+            return [
+                'success' => true,
+                'message' => 'Monthly ledger regenerated successfully.',
+                'period'  => [
+                    'start_date' => $startDate,
+                    'end_date'   => date('Y-m-d', strtotime('-1 day', $endTimestamp)),
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'error'   => 'Failed to update ledger reports: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    public function actionUpdatereportmonthlyOld3()
+    {
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $inputDate = Yii::$app->request->getBodyParam('date');
+        if (!$inputDate) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Date parameter is required'];
+        }
+
+        $time = strtotime($inputDate);
+        if ($time === false) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Invalid date format provided'];
+        }
+
+        $startDate = date('Y-m-01', $time);
+        $endDate   = date('Y-m-01', strtotime('+1 month', $time));
+
+        // Get initial running parameters if passed via request body
+        $initialMoneyHand = Yii::$app->request->getBodyParam('running_money_on_hand');
+        $initialTubo      = Yii::$app->request->getBodyParam('running_tubo');
+        $initialPuhunan   = Yii::$app->request->getBodyParam('running_puhunan');
+
+        // Fallback: Query ending balances from the day BEFORE start_date (e.g., July 31)
+        if ($initialMoneyHand === null || $initialTubo === null || $initialPuhunan === null) {
+            $prevDayLedger = Yii::$app->db->createCommand("
+                SELECT total_puhunan, total_tubo, money_on_hand 
+                FROM daily_business_ledger_v2 
+                WHERE report_date < :start_date 
+                ORDER BY report_date DESC 
+                LIMIT 1
+            ")->bindValue(':start_date', $startDate)->queryOne();
+
+            $runningPuhunan   = $prevDayLedger ? (float)$prevDayLedger['total_puhunan'] : 0.00;
+            $runningTubo      = $prevDayLedger ? (float)$prevDayLedger['total_tubo'] : 0.00;
+            $runningMoneyHand = $prevDayLedger ? (float)$prevDayLedger['money_on_hand'] : 0.00;
+        } else {
+            $runningPuhunan   = (float)$initialPuhunan;
+            $runningTubo      = (float)$initialTubo;
+            $runningMoneyHand = (float)$initialMoneyHand;
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+
+        try {
+            // 1. Delete target month snapshots
+            Yii::$app->db->createCommand("
+                DELETE FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->execute();
+
+            // 2. Insert refreshed itemized sales snapshots
+            Yii::$app->db->createCommand("
+                INSERT INTO daily_financial_snapshots_v2
+                    (report_date, inventory_id, source_type, source_item_id, puhunan, tubo, total_sales, monitored)
+                SELECT 
+                    DATE(s.date_sold) AS report_date,
+                    si.inventory_id,
+                    'sale' AS source_type,
+                    si.id AS source_item_id,
+                    (si.qty_sold * si.cost_per_unit) AS puhunan,
+                    (si.total - (si.qty_sold * si.cost_per_unit)) AS tubo,
+                    si.total AS total_sales,
+                    i.monitored
+                FROM sales s
+                JOIN sales_items si ON s.id = si.sales_id
+                LEFT JOIN inventory i ON si.inventory_id = i.id
+                WHERE s.date_sold >= :start_date AND s.date_sold < :end_date
+                  AND s.status = 'approved' AND s.is_paid = 'yes'
+                ORDER BY s.date_sold ASC, si.id ASC
+                ON DUPLICATE KEY UPDATE 
+                    puhunan = VALUES(puhunan), 
+                    tubo = VALUES(tubo), 
+                    total_sales = VALUES(total_sales);
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->execute();
+
+            // 3. Query unmonitored sales aggregates grouped by day
+            $dailyAggregates = Yii::$app->db->createCommand("
+                SELECT 
+                    report_date,
+                    SUM(puhunan) AS day_puhunan,
+                    SUM(tubo) AS day_tubo,
+                    SUM(total_sales) AS day_sales
+                FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date AND monitored = 0
+                GROUP BY report_date
+                ORDER BY report_date ASC
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            $salesByDate = [];
+            foreach ($dailyAggregates as $row) {
+                $salesByDate[$row['report_date']] = $row;
+            }
+
+            // 4. Query monitored sales aggregated by inventory_id and report_date
+            $monitoredRows = Yii::$app->db->createCommand("
+                SELECT 
+                    inventory_id,
+                    report_date,
+                    SUM(puhunan) AS day_puhunan,
+                    SUM(tubo) AS day_tubo,
+                    SUM(total_sales) AS day_sales
+                FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date AND monitored = 1
+                GROUP BY inventory_id, report_date
+                ORDER BY inventory_id ASC, report_date ASC
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            // Group data into nested array: $monitoredByInventory[inventory_id][report_date]
+            $monitoredByInventory = [];
+
+            foreach ($monitoredRows as $row) {
+                $invId   = (int)$row['inventory_id'];
+                $repDate = $row['report_date'];
+
+                if (!isset($monitoredByInventory[$invId])) {
+                    $monitoredByInventory[$invId] = [];
+                }
+
+                $monitoredByInventory[$invId][$repDate] = [
+                    'day_puhunan' => (float)$row['day_puhunan'],
+                    'day_tubo'    => (float)$row['day_tubo'],
+                    'day_sales'   => (float)$row['day_sales'],
+                ];
+            }
+
+            // 5. Fetch existing manual expenses per day (hardware, bahay, ex_*) to preserve them
+            $existingExpenses = Yii::$app->db->createCommand("
+                SELECT 
+                    report_date,
+                    -- (hardware + bahay + ex_21 + ex_1423 + ex_1422 + ex_1421 + ex_1894 + ex_1895 + ex_1899 + ex_1900 + ex_1905) AS total_expenses,
+                    hardware,
+                    bahay
+                FROM daily_business_ledger_v2
+                WHERE report_date >= :start_date AND report_date < :end_date
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            $hardwareDate = [];
+            $bahayDate = [];
+            foreach ($existingExpenses as $exp) {
+                $hardwareDate[$exp['report_date']] = (float)$exp['hardware'];
+                $bahayDate[$exp['report_date']] = (float)$exp['bahay'];
+            }
+
+
+            // 6. Prepare UPSERT Command
+            $sqlUpsertDay = "
+                INSERT INTO daily_business_ledger_v2 (
+                    report_date, inventory_id, source_type, source_item_id,
+                    puhunan, tubo, total_sales,
+                    starting_puhunan, starting_tubo, starting_money_on_hand,
+                    total_puhunan, total_tubo, money_on_hand
+                ) VALUES (
+                    :report_date, 0, 'daily_summary', 0,
+                    :puhunan, :tubo, :total_sales,
+                    :starting_puhunan, :starting_tubo, :starting_money_on_hand,
+                    :total_puhunan, :total_tubo, :money_on_hand
+                )
+                ON DUPLICATE KEY UPDATE
+                    puhunan                = VALUES(puhunan),
+                    tubo                   = VALUES(tubo),
+                    total_sales            = VALUES(total_sales),
+                    starting_puhunan       = VALUES(starting_puhunan),
+                    starting_tubo          = VALUES(starting_tubo),
+                    starting_money_on_hand = VALUES(starting_money_on_hand),
+                    total_puhunan          = VALUES(total_puhunan),
+                    total_tubo             = VALUES(total_tubo),
+                    money_on_hand          = VALUES(money_on_hand);
+            ";
+
+            $cmdUpsertDay = Yii::$app->db->createCommand($sqlUpsertDay);
+
+            // 6. Chronological Calculation Loop
+            $currentTimestamp = strtotime($startDate);
+            $endTimestamp     = strtotime($endDate);
+
+            while ($currentTimestamp < $endTimestamp) {
+                $dateStr = date('Y-m-d', $currentTimestamp);
+
+                // Fetch day sales
+                $daySales   = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_sales'] : 0.00;
+                $dayPuhunan = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_puhunan'] : 0.00;
+                $dayTubo    = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_tubo'] : 0.00;
+
+                // Fetch existing manual expenses for current date
+                $hardwerDeduct = isset($hardwareDate[$dateStr]) ? $hardwareDate[$dateStr] : 0.00;
+                $bahayDeduct = isset($bahayDate[$dateStr]) ? $bahayDate[$dateStr] : 0.00;
+
+                // Carry over previous day ending values to current day starting values
+                $startingPuhunan   = $runningPuhunan;
+                $startingTubo      = $runningTubo;
+                $startingMoneyHand = $runningMoneyHand;
+
+                // Calculate current day net additions
+                $runningPuhunan   += ($dayPuhunan - $hardwerDeduct);
+                $runningTubo      += ($dayTubo - $bahayDeduct);
+                $runningMoneyHand += ($daySales - $hardwerDeduct - $bahayDeduct);
+
+                // Execute update/insert if there are sales OR manual expenses present
+                if ($daySales > 0) {
+                    $cmdUpsertDay->bindValues([
+                        ':report_date'            => $dateStr,
+                        ':puhunan'                => $dayPuhunan,
+                        ':tubo'                   => $dayTubo,
+                        ':total_sales'            => $daySales,
+                        ':starting_puhunan'       => $startingPuhunan,
+                        ':starting_tubo'          => $startingTubo,
+                        ':starting_money_on_hand' => $startingMoneyHand,
+                        ':total_puhunan'          => $runningPuhunan,
+                        ':total_tubo'             => $runningTubo,
+                        ':money_on_hand'          => $runningMoneyHand,
+                    ])->execute();
+                }
+
+                $currentTimestamp = strtotime('+1 day', $currentTimestamp);
+            }
+
+            $transaction->commit();
+
+            return [
+                'data' => $monitoredByInventory,
+                'success' => true,
+                'message' => 'Monthly ledger regenerated with manual expense deductions.',
+                'period'  => [
+                    'start_date' => $startDate,
+                    'end_date'   => date('Y-m-d', strtotime('-1 day', $endTimestamp)),
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'error'   => 'Failed to update ledger reports: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    public function actionUpdatereportmonthlyOld4()
+    {
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $inputDate = Yii::$app->request->getBodyParam('date');
+        if (!$inputDate) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Date parameter is required'];
+        }
+
+        $time = strtotime($inputDate);
+        if ($time === false) {
+            Yii::$app->response->statusCode = 400;
+            return ['error' => 'Invalid date format provided'];
+        }
+
+        $startDate = date('Y-m-01', $time);
+        $endDate   = date('Y-m-01', strtotime('+1 month', $time));
+
+        // Get initial running parameters if passed via request body
+        $initialMoneyHand = Yii::$app->request->getBodyParam('running_money_on_hand');
+        $initialTubo      = Yii::$app->request->getBodyParam('running_tubo');
+        $initialPuhunan   = Yii::$app->request->getBodyParam('running_puhunan');
+
+        // Fallback: Query ending balances from the day BEFORE start_date (e.g., July 31)
+        if ($initialMoneyHand === null || $initialTubo === null || $initialPuhunan === null) {
+            $prevDayLedger = Yii::$app->db->createCommand("
+                SELECT total_puhunan, total_tubo, money_on_hand 
+                FROM daily_business_ledger_v2 
+                WHERE report_date < :start_date 
+                ORDER BY report_date DESC 
+                LIMIT 1
+            ")->bindValue(':start_date', $startDate)->queryOne();
+
+            $runningPuhunan   = $prevDayLedger ? (float)$prevDayLedger['total_puhunan'] : 0.00;
+            $runningTubo      = $prevDayLedger ? (float)$prevDayLedger['total_tubo'] : 0.00;
+            $runningMoneyHand = $prevDayLedger ? (float)$prevDayLedger['money_on_hand'] : 0.00;
+        } else {
+            $runningPuhunan   = (float)$initialPuhunan;
+            $runningTubo      = (float)$initialTubo;
+            $runningMoneyHand = (float)$initialMoneyHand;
+        }
+
+        $transaction = Yii::$app->db->beginTransaction();
+
+        try {
+            // 1. Delete target month snapshots
+            Yii::$app->db->createCommand("
+                DELETE FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->execute();
+
+            // 2. Insert refreshed itemized sales snapshots
+            Yii::$app->db->createCommand("
+                INSERT INTO daily_financial_snapshots_v2
+                    (report_date, inventory_id, source_type, source_item_id, puhunan, tubo, total_sales, monitored)
+                SELECT 
+                    DATE(s.date_sold) AS report_date,
+                    si.inventory_id,
+                    'sale' AS source_type,
+                    si.id AS source_item_id,
+                    (si.qty_sold * si.cost_per_unit) AS puhunan,
+                    (si.total - (si.qty_sold * si.cost_per_unit)) AS tubo,
+                    si.total AS total_sales,
+                    i.monitored
+                FROM sales s
+                JOIN sales_items si ON s.id = si.sales_id
+                LEFT JOIN inventory i ON si.inventory_id = i.id
+                WHERE s.date_sold >= :start_date AND s.date_sold < :end_date
+                  AND s.status = 'approved' AND s.is_paid = 'yes'
+                ORDER BY s.date_sold ASC, si.id ASC
+                ON DUPLICATE KEY UPDATE 
+                    puhunan = VALUES(puhunan), 
+                    tubo = VALUES(tubo), 
+                    total_sales = VALUES(total_sales);
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->execute();
+
+            // 3. Query unmonitored sales aggregates grouped by day
+            $dailyAggregates = Yii::$app->db->createCommand("
+                SELECT 
+                    report_date,
+                    SUM(puhunan) AS day_puhunan,
+                    SUM(tubo) AS day_tubo,
+                    SUM(total_sales) AS day_sales
+                FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date AND monitored = 0
+                GROUP BY report_date
+                ORDER BY report_date ASC
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            $salesByDate = [];
+            foreach ($dailyAggregates as $row) {
+                $salesByDate[$row['report_date']] = $row;
+            }
+
+            // 4. Query monitored sales aggregated by inventory_id and report_date
+            $monitoredRows = Yii::$app->db->createCommand("
+                SELECT 
+                    inventory_id,
+                    report_date,
+                    SUM(puhunan) AS day_puhunan,
+                    SUM(tubo) AS day_tubo,
+                    SUM(total_sales) AS day_sales
+                FROM daily_financial_snapshots_v2
+                WHERE report_date >= :start_date AND report_date < :end_date AND monitored = 1
+                GROUP BY inventory_id, report_date
+                ORDER BY inventory_id ASC, report_date ASC
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            // Group data into nested array: $monitoredByInventory[inventory_id][report_date]
+            $monitoredByInventory = [];
+            $monitoredInventoryIds = [];
+
+            foreach ($monitoredRows as $row) {
+                $invId   = (int)$row['inventory_id'];
+                $repDate = $row['report_date'];
+
+                if (!isset($monitoredByInventory[$invId])) {
+                    $monitoredByInventory[$invId] = [];
+                }
+
+                $monitoredByInventory[$invId][$repDate] = [
+                    'day_puhunan' => (float)$row['day_puhunan'],
+                    'day_tubo'    => (float)$row['day_tubo'],
+                    'day_sales'   => (float)$row['day_sales'],
+                ];
+
+                if (!in_array($invId, $monitoredInventoryIds)) {
+                    $monitoredInventoryIds[] = $invId;
+                }
+            }
+
+            // 5. Fetch existing manual expenses per day (hardware, bahay, etc.)
+            $existingExpenses = Yii::$app->db->createCommand("
+                SELECT 
+                    report_date,
+                    hardware,
+                    bahay
+                FROM daily_business_ledger_v2
+                WHERE report_date >= :start_date AND report_date < :end_date
+            ")->bindValue(':start_date', $startDate)
+              ->bindValue(':end_date', $endDate)
+              ->queryAll();
+
+            $hardwareDate = [];
+            $bahayDate    = [];
+            foreach ($existingExpenses as $exp) {
+                $hardwareDate[$exp['report_date']] = (float)$exp['hardware'];
+                $bahayDate[$exp['report_date']]    = (float)$exp['bahay'];
+            }
+
+            // 6. Dynamically Build the UPSERT Query with Monitored p_* and t_* Columns
+            $insertCols = [
+                'report_date', 'inventory_id', 'source_type', 'source_item_id',
+                'puhunan', 'tubo', 'total_sales',
+                'starting_puhunan', 'starting_tubo', 'starting_money_on_hand',
+                'total_puhunan', 'total_tubo', 'money_on_hand'
+            ];
+
+            $insertValues = [
+                ':report_date', '0', "'daily_summary'", '0',
+                ':puhunan', ':tubo', ':total_sales',
+                ':starting_puhunan', ':starting_tubo', ':starting_money_on_hand',
+                ':total_puhunan', ':total_tubo', ':money_on_hand'
+            ];
+
+            $updateClauses = [
+                'puhunan                = VALUES(puhunan)',
+                'tubo                   = VALUES(tubo)',
+                'total_sales            = VALUES(total_sales)',
+                'starting_puhunan       = VALUES(starting_puhunan)',
+                'starting_tubo          = VALUES(starting_tubo)',
+                'starting_money_on_hand = VALUES(starting_money_on_hand)',
+                'total_puhunan          = VALUES(total_puhunan)',
+                'total_tubo             = VALUES(total_tubo)',
+                'money_on_hand          = VALUES(money_on_hand)'
+            ];
+
+            // Append dynamic monitored fields (e.g., p_21, t_21, p_1421, t_1421)
+            foreach ($monitoredInventoryIds as $invId) {
+                $pCol = "p_{$invId}";
+                $tCol = "t_{$invId}";
+
+                $insertCols[]   = "`{$pCol}`";
+                $insertCols[]   = "`{$tCol}`";
+
+                $insertValues[] = ":{$pCol}";
+                $insertValues[] = ":{$tCol}";
+
+                $updateClauses[] = "`{$pCol}` = VALUES(`{$pCol}`)";
+                $updateClauses[] = "`{$tCol}` = VALUES(`{$tCol}`)";
+            }
+
+            $sqlUpsertDay = "
+                INSERT INTO daily_business_ledger_v2 (
+                    " . implode(', ', $insertCols) . "
+                ) VALUES (
+                    " . implode(', ', $insertValues) . "
+                )
+                ON DUPLICATE KEY UPDATE
+                    " . implode(",\n", $updateClauses) . ";
+            ";
+
+            $cmdUpsertDay = Yii::$app->db->createCommand($sqlUpsertDay);
+
+            // 7. Chronological Calculation Loop
+            $currentTimestamp = strtotime($startDate);
+            $endTimestamp     = strtotime($endDate);
+
+            while ($currentTimestamp < $endTimestamp) {
+                $dateStr = date('Y-m-d', $currentTimestamp);
+
+                // Fetch unmonitored day sales
+                $daySales   = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_sales'] : 0.00;
+                $dayPuhunan = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_puhunan'] : 0.00;
+                $dayTubo    = isset($salesByDate[$dateStr]) ? (float)$salesByDate[$dateStr]['day_tubo'] : 0.00;
+
+                // Fetch existing manual expenses
+                $hardwerDeduct = isset($hardwareDate[$dateStr]) ? $hardwareDate[$dateStr] : 0.00;
+                $bahayDeduct   = isset($bahayDate[$dateStr])    ? $bahayDate[$dateStr]    : 0.00;
+
+                // Carry over previous day ending values to current day starting values
+                $startingPuhunan   = $runningPuhunan;
+                $startingTubo      = $runningTubo;
+                $startingMoneyHand = $runningMoneyHand;
+
+                // Calculate current day net additions (hardware & bahay deducted from tubo & money_on_hand)
+                $runningPuhunan   += $dayPuhunan;
+                $runningTubo      += ($dayTubo - $hardwerDeduct - $bahayDeduct);
+                $runningMoneyHand += ($daySales - $hardwerDeduct - $bahayDeduct);
+
+                // Bind basic daily balances
+                $bindParams = [
+                    ':report_date'            => $dateStr,
+                    ':puhunan'                => $dayPuhunan,
+                    ':tubo'                   => $dayTubo,
+                    ':total_sales'            => $daySales,
+                    ':starting_puhunan'       => $startingPuhunan,
+                    ':starting_tubo'          => $startingTubo,
+                    ':starting_money_on_hand' => $startingMoneyHand,
+                    ':total_puhunan'          => $runningPuhunan,
+                    ':total_tubo'             => $runningTubo,
+                    ':money_on_hand'          => $runningMoneyHand,
+                ];
+
+                // Check if there are monitored sales on this day
+                $hasMonitoredSales = false;
+
+                // Bind monitored item values (p_* and t_*) for this date
+                foreach ($monitoredInventoryIds as $invId) {
+                    $pCol = "p_{$invId}";
+                    $tCol = "t_{$invId}";
+
+                    $monPuhunan = 0.00;
+                    $monTubo    = 0.00;
+
+                    if (isset($monitoredByInventory[$invId][$dateStr])) {
+                        $monPuhunan = $monitoredByInventory[$invId][$dateStr]['day_puhunan'];
+                        $monTubo    = $monitoredByInventory[$invId][$dateStr]['day_tubo'];
+                        $hasMonitoredSales = true;
+                    }
+
+                    $bindParams[":{$pCol}"] = $monPuhunan;
+                    $bindParams[":{$tCol}"] = $monTubo;
+                }
+
+                // Execute insert/update if there are unmonitored sales, monitored sales, or manual expenses
+                if ($daySales > 0 || $hasMonitoredSales || $hardwerDeduct > 0 || $bahayDeduct > 0) {
+                    $cmdUpsertDay->bindValues($bindParams)->execute();
+                }
+
+                $currentTimestamp = strtotime('+1 day', $currentTimestamp);
+            }
+
+            $transaction->commit();
+
+            return [
+                'success' => true,
+                'message' => 'Monthly ledger regenerated successfully with monitored p_* and t_* mappings.',
+                'period'  => [
+                    'start_date' => $startDate,
+                    'end_date'   => date('Y-m-d', strtotime('-1 day', $endTimestamp)),
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 500;
+            return [
+                'success' => false,
+                'error'   => 'Failed to update ledger reports: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    public function actionUpdatereportmonthly()
+    {
+        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
+
+        if (Yii::$app->request->method !== 'POST') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $inputDate = Yii::$app->request->getBodyParam('date');
         if (!$inputDate) {
             Yii::$app->response->statusCode = 400;
             return ['error' => 'Date parameter is required'];
@@ -1065,287 +1959,17 @@ class ReportsController extends Controller
             return ['error' => 'Invalid date format provided. Expected formats like "08, 2026" or "YYYY-MM"'];
         }
 
-        return $d;
-    }
-
-    public function actionUpdateledgervalue() 
-    {
-        // 1. Force JSON response format
-        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
-
-        if (Yii::$app->request->method !== 'PUT') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        // 2. Extract parameters from the POST body
-        $id = Yii::$app->request->getBodyParam('id');
-        $amount = Yii::$app->request->getBodyParam('amount');
-        $details = Yii::$app->request->getBodyParam('details');
-        $save_type = Yii::$app->request->getBodyParam('save_type');
-
-        // 3. Validation: Make sure the required fields exist
-        if (!$id) {
-            Yii::$app->response->statusCode = 400;
-            return ['error' => 'ID parameter is required'];
-        }
-        if ($amount === null || $details === null) {
-            Yii::$app->response->statusCode = 400;
-            return ['error' => 'Both '.$save_type.' and '.$save_type.'_details are required'];
-        }
-
-        try {
-            // 4. Execute the update query using parameters
-            $save_type = ($save_type == "bahay" || $save_type == "hardware") ? $save_type : "ex_" . $save_type ;
-            $sql = "UPDATE daily_business_ledger_v2 SET ".$save_type." = :amount, ".$save_type."_details = :details WHERE id = :id";
-
-            $rowsAffected = Yii::$app->db->createCommand($sql)
-                ->bindValues([
-                    ':amount' => $amount,
-                    ':details' => $details,
-                    ':id' => $id,
-                ])
-                ->execute();
-
-            $date = Yii::$app->request->getBodyParam('date');
-            $initialMoneyOnHand = Yii::$app->request->getBodyParam('initialMoneyOnHand');
-            $initialPuhunan = Yii::$app->request->getBodyParam('initialPuhunan');
-            $initialTubo = Yii::$app->request->getBodyParam('initialTubo');
-            $this->processReportMonthly($date, $initialMoneyOnHand, $initialPuhunan, $initialTubo);
-
-            // 5. Return success status
-            return [
-                'success' => true,
-                'message' => 'Ledger updated successfully',
-                'rows_affected' => $rowsAffected
-            ];
-
-        } catch (\Exception $e) {
-            // Handle database errors gracefully without crashing the API
-            Yii::$app->response->statusCode = 500;
-            return [
-                'success' => false,
-                'error' => 'Database error: ' . $e->getMessage()
-            ];
-        }
-    }
-
-    public function actionUpdatereportmonthly()
-    {
-        Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
-
-        if (Yii::$app->request->method !== 'POST') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        $inputDate = Yii::$app->request->getBodyParam('date');
-
-        // Get initial running parameters if passed via request body
-        $initialMoneyHand = Yii::$app->request->getBodyParam('running_money_on_hand');
-        $initialTubo      = Yii::$app->request->getBodyParam('running_tubo');
-        $initialPuhunan   = Yii::$app->request->getBodyParam('running_puhunan');
-
-        $this->processReportMonthly($inputDate, $initialMoneyHand, $initialTubo, $initialPuhunan);
-    }
-    
-    public function actionGetmonthlybusinessledger() 
-    {
-        if (Yii::$app->request->method !== 'GET') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.monitored = 1";
-        $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
-        $additionalHeader = [];
-        $monitoredIds = [];
-        // foreach ($dataInventory as $item) {
-        //     $additionalHeader[] = ["title"=>"P - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-        //     $additionalHeader[] = ["title"=>"T - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-        //     $additionalHeader[] = ["title"=>"Ex - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-        //     // $additionalHeader[] = ["title"=>"TS - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-        //     $monitoredIds[] = $item["id"];
-        // }
-
-        $tableHeader = [
-            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
-            ["title"=>"Month","name"=>"date","align"=>"left","class"=>"w-40"],
-            ["title"=>"Initial Money on Hand","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            // ["title"=>"Initial Puhunan","name"=>"puhunan","align"=>"right","class"=>"w-28"],
-            // ["title"=>"Initial Tubo","name"=>"tubo","align"=>"right","class"=>"w-28"],
-            ["title"=>"Initial Puhunan","name"=>"total_sales","align"=>"right","class"=>"w-28"],
-            ["title"=>"Initial Tubo","name"=>"total_sales","align"=>"right","class"=>"w-28"],
-            // ["title"=>"Total Sales","name"=>"total_amount","align"=>"right","class"=>"w-28"],
-            ["title"=>"Final Money On Hand","name"=>"money_on_hand","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final Puhunan","name"=>"total_puhunan","align"=>"right","class"=>"w-28"],
-            ["title"=>"Final Tubo","name"=>"total_tubo","align"=>"right","class"=>"w-28"],
-            ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
-        ];
-        array_splice($tableHeader, 5, 0, $additionalHeader);
-
-        $prefixed_string = "";
-        $prefixed_array = array_map(function($item) { return 'ex_' . $item; }, $monitoredIds);
-        $prefixed_string = implode(", ", $prefixed_array);
-        $prefixed_array = array_map(function($item) { return 'ex_' . $item . '_details'; }, $monitoredIds);
-        $prefixed_string = ", " . $prefixed_string . ", " . implode(", ", $prefixed_array);
-
-        $sql = "
-            SELECT 
-                *, 
-                DATE_FORMAT(date, '%M, %Y') AS date,
-                DATE_FORMAT(date, '%m, %Y') AS date_value
-            FROM monthly_business_ledger_v2;
-        ";
-        $data = Yii::$app->db->createCommand($sql)->queryAll();
-
-        return [
-            'data' => $data,
-            'monitored_items' => $dataInventory,
-            'count' => count($data),
-            'mids' => $dataInventory,
-            'success' => true,
-            'headers' => json_encode($tableHeader),
-
-            // 'totalPuhunan' => $totalPuhunan->amount,
-            // 'totalTubo' => $totalTubo->amount,
-            // 'totalSales' => $totalSales->amount,
-            // 'totalPuhunanCement' => $totalPuhunanCement->amount,
-            // 'totalTuboCement' => $totalTuboCement->amount,
-            // 'totalPuhunanRSB' => $totalPuhunanRSB->amount,
-            // 'totalTuboRSB' => $totalTuboRSB->amount,
-            // 'totalPuhunanAll' => $totalPuhunanAll,
-            // 'totalTuboAll' => $totalTuboAll,
-        ];       
-    }
-
-    public function actionGetmonthlyviewbusinessledger() 
-    {
-        if (Yii::$app->request->method !== 'GET') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        $inputDate = Yii::$app->request->get('date');
-        $d = $this->formatMonthlyReportDate($inputDate);
-
-        $startDate = $d->format('Y-m-01');
-        $endDateTime = (clone $d)->modify('first day of next month');
-        $endDate = $endDateTime->format('Y-m-01');
-
-        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.monitored = 1";
-        $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
-        $additionalHeader = [];
-        $monitoredIds = [];
-        foreach ($dataInventory as $item) {
-            $additionalHeader[] = ["title"=>"P - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-            $additionalHeader[] = ["title"=>"T - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-            $additionalHeader[] = ["title"=>"Ex - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-            $monitoredIds[] = $item["id"];
-        }
-
-        $tableHeader = [
-            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
-            ["title"=>"Date","name"=>"date","align"=>"left","class"=>"w-40"],
-            ["title"=>"Puhunan","name"=>"puhunan","align"=>"right","class"=>"w-28"],
-            ["title"=>"Tubo","name"=>"tubo","align"=>"right","class"=>"w-28"],
-            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right","class"=>"w-28"],
-            ["title"=>"Hardware","name"=>"hardware","align"=>"right","class"=>"w-28"],
-            ["title"=>"Bahay","name"=>"bahay","align"=>"right","class"=>"w-28"],
-            ["title"=>"Total Amount","name"=>"total_amount","align"=>"right","class"=>"w-28"],
-            ["title"=>"Money On Hand","name"=>"money_on_hand","align"=>"right","class"=>"w-28"],
-            ["title"=>"Total Puhunan","name"=>"total_puhunan","align"=>"right","class"=>"w-28"],
-            ["title"=>"Total Tubo","name"=>"total_tubo","align"=>"right","class"=>"w-28"],
-            // ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
-        ];
-        array_splice($tableHeader, 5, 0, $additionalHeader);
-
-        $sql = "
-            SELECT * FROM daily_business_ledger_v2 
-            WHERE report_date >= '$startDate' AND report_date < '$endDate' 
-            ORDER BY report_date DESC;
-        ";
-        $data = Yii::$app->db->createCommand($sql)->queryAll();
-
-        $sqlTotals = "
-            SELECT 
-                COALESCE(SUM(dbl.puhunan), 0) AS puhunan,
-                COALESCE(SUM(dbl.tubo), 0) AS tubo,
-                COALESCE(SUM(dbl.total_sales), 0) AS total_sales,
-
-                COALESCE(SUM(dbl.p_21), 0) AS puhunan_cement,
-                COALESCE(SUM(dbl.t_21), 0) AS tubo_cement,
-
-                SUM(+ COALESCE(dbl.p_1421, 0) + COALESCE(dbl.p_1422, 0) + COALESCE(dbl.p_1423, 0)) AS puhunan_rsb,
-                SUM(+ COALESCE(dbl.t_1421, 0) + COALESCE(dbl.t_1422, 0) + COALESCE(dbl.t_1423, 0)) AS tubo_rsb,
-
-
-                COALESCE(SUM(dbl.puhunan), 0) AS puhunan,
-                DATE_FORMAT(report_date, '%M, %Y') AS group_date
-            FROM daily_business_ledger_v2 as dbl
-            WHERE report_date >= '$startDate' AND report_date < '$endDate'
-            GROUP BY group_date;
-        ";
-        $dataTotals = Yii::$app->db->createCommand($sqlTotals)->queryOne();
-
-        $sqlMonth = "
-            SELECT *
-            FROM monthly_business_ledger_v2 as mbl
-            WHERE date >= '$startDate' AND date < '$endDate';
-        ";
-        $dataMonth = Yii::$app->db->createCommand($sqlMonth)->queryOne();
-
-        if (empty($dataTotals)) {
-            return [
-                'success' => false,
-                'message' => 'No total data available',
-                'data' => $data,
-                'count' => 0,
-                'mids' => $dataInventory,
-                'headers' => json_encode($tableHeader),
-            ];
-        }
-
-        return [
-            'data' => $data,
-            'mids' => $dataInventory,
-            'count' => count($data),
-            'success' => true,
-            'headers' => json_encode($tableHeader),
-
-            'totalPuhunan' => $dataTotals['puhunan'],
-            'totalTubo' => $dataTotals['tubo'],
-            'totalSales' => $dataTotals['total_sales'],
-
-            'totalPuhunanCement' => $dataTotals['puhunan_cement'],
-            'totalTuboCement' => $dataTotals['tubo_cement'],
-
-            'totalPuhunanRSB' => $dataTotals['puhunan_rsb'],
-            'totalTuboRSB' => $dataTotals['tubo_rsb'],
-
-            'initialMoneyOnHand' => $dataMonth['initial_money_on_hand'],
-            'initialPuhunan' => $dataMonth['initial_puhunan'],
-            'initialTubo' => $dataMonth['initial_tubo'],
-
-            'finalMoneyOnHand' => $dataMonth['running_money_on_hand'],
-            'finalPuhunan' => $dataMonth['running_puhunan'],
-            'finalTubo' => $dataMonth['running_tubo'],
-            'reportId' => $dataMonth['id'],
-
-            // 'dataTotals' => $dataTotals,
-            // 'sql' => $sql,
-        ];       
-    }
-
-    public function processReportMonthly($inputDate, $initialMoneyHand, $initialTubo, $initialPuhunan) {
-        $d = $this->formatMonthlyReportDate($inputDate);
-
         // Normalize to the 1st of the month
         $startDate = $d->format('Y-m-01');
         
         // Calculate the start of the next month
         $endDateTime = (clone $d)->modify('first day of next month');
         $endDate = $endDateTime->format('Y-m-01');
+
+        // Get initial running parameters if passed via request body
+        $initialMoneyHand = Yii::$app->request->getBodyParam('running_money_on_hand');
+        $initialTubo      = Yii::$app->request->getBodyParam('running_tubo');
+        $initialPuhunan   = Yii::$app->request->getBodyParam('running_puhunan');
 
         // Fallback: Query ending balances from the day BEFORE start_date
         if ($initialMoneyHand === null || $initialTubo === null || $initialPuhunan === null) {
@@ -1625,9 +2249,6 @@ class ReportsController extends Controller
                     puhunan,
                     tubo,
                     total_sales,
-                    initial_money_on_hand,
-                    initial_puhunan,
-                    initial_tubo,
                     running_puhunan,
                     running_tubo,
                     running_money_on_hand,
@@ -1644,9 +2265,6 @@ class ReportsController extends Controller
                     :puhunan,
                     :tubo,
                     :total_sales,
-                    :initial_money_on_hand,
-                    :initial_puhunan,
-                    :initial_tubo,
                     :running_puhunan,
                     :running_tubo,
                     :running_money_on_hand,
@@ -1663,9 +2281,6 @@ class ReportsController extends Controller
                     puhunan                 = VALUES(puhunan),
                     tubo                    = VALUES(tubo),
                     total_sales             = VALUES(total_sales),
-                    initial_money_on_hand   = VALUES(initial_money_on_hand),
-                    initial_puhunan         = VALUES(initial_puhunan),
-                    initial_tubo            = VALUES(initial_tubo),
                     running_puhunan         = VALUES(running_puhunan),
                     running_tubo            = VALUES(running_tubo),
                     running_money_on_hand   = VALUES(running_money_on_hand),
@@ -1681,10 +2296,6 @@ class ReportsController extends Controller
                 ':puhunan'                  => $runningPuhunan,
                 ':tubo'                     => $runningTubo,
                 ':total_sales'              => $runningTotalSales,
-
-                ':initial_money_on_hand'    => $initialMoneyHand,
-                ':initial_puhunan'          => $initialPuhunan,
-                ':initial_tubo'             => $initialTubo,
 
                 ':running_puhunan'          => $runningTotalPuhunan,
                 ':running_tubo'             => $runningTotalTubo,
@@ -1731,5 +2342,74 @@ class ReportsController extends Controller
                 'error'   => 'Failed to update ledger reports: ' . $e->getMessage()
             ];
         }
+    }
+    
+    public function actionGetmonthlybusinessledger() 
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.monitored = 1";
+        $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
+        $additionalHeader = [];
+        $monitoredIds = [];
+        // foreach ($dataInventory as $item) {
+        //     $additionalHeader[] = ["title"=>"P - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+        //     $additionalHeader[] = ["title"=>"T - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+        //     $additionalHeader[] = ["title"=>"Ex - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+        //     // $additionalHeader[] = ["title"=>"TS - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
+        //     $monitoredIds[] = $item["id"];
+        // }
+
+        $tableHeader = [
+            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
+            ["title"=>"Month","name"=>"date","align"=>"left","class"=>"w-40"],
+            ["title"=>"Puhunan","name"=>"puhunan","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo","name"=>"tubo","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Sales","name"=>"total_sales","align"=>"right","class"=>"w-28"],
+            ["title"=>"Hardware","name"=>"hardware","align"=>"right","class"=>"w-28"],
+            ["title"=>"Bahay","name"=>"bahay","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Amount","name"=>"total_amount","align"=>"right","class"=>"w-28"],
+            ["title"=>"Money On Hand","name"=>"money_on_hand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Puhunan","name"=>"total_puhunan","align"=>"right","class"=>"w-28"],
+            ["title"=>"Total Tubo","name"=>"total_tubo","align"=>"right","class"=>"w-28"],
+            ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
+        ];
+        array_splice($tableHeader, 5, 0, $additionalHeader);
+
+        $prefixed_string = "";
+        $prefixed_array = array_map(function($item) { return 'ex_' . $item; }, $monitoredIds);
+        $prefixed_string = implode(", ", $prefixed_array);
+        $prefixed_array = array_map(function($item) { return 'ex_' . $item . '_details'; }, $monitoredIds);
+        $prefixed_string = ", " . $prefixed_string . ", " . implode(", ", $prefixed_array);
+
+        $sql = "
+            SELECT 
+                *, 
+                DATE_FORMAT(date, '%M, %Y') AS date
+            FROM monthly_business_ledger_v2;
+        ";
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
+
+        return [
+            'data' => $data,
+            'monitored_items' => $dataInventory,
+            'count' => count($data),
+            'mids' => $dataInventory,
+            'success' => true,
+            'headers' => json_encode($tableHeader),
+
+            // 'totalPuhunan' => $totalPuhunan->amount,
+            // 'totalTubo' => $totalTubo->amount,
+            // 'totalSales' => $totalSales->amount,
+            // 'totalPuhunanCement' => $totalPuhunanCement->amount,
+            // 'totalTuboCement' => $totalTuboCement->amount,
+            // 'totalPuhunanRSB' => $totalPuhunanRSB->amount,
+            // 'totalTuboRSB' => $totalTuboRSB->amount,
+            // 'totalPuhunanAll' => $totalPuhunanAll,
+            // 'totalTuboAll' => $totalTuboAll,
+        ];       
     }
 }

@@ -1070,13 +1070,49 @@ class InventoryController extends Controller
         $sql = "";
         if ((int) $item->monitored == 1) {
             $sql = "
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `p_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `p_".$item->id."_details` TEXT NOT NULL;
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `t_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `t_".$item->id."_details` TEXT NOT NULL;
                 ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `ex_".$item->id."` FLOAT NOT NULL DEFAULT '0';
                 ALTER TABLE `daily_business_ledger` ADD COLUMN IF NOT EXISTS `ex_".$item->id."_details` TEXT NOT NULL;
+
+                ALTER TABLE `daily_business_ledger_v2` ADD COLUMN IF NOT EXISTS `p_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger_v2` ADD COLUMN IF NOT EXISTS `p_".$item->id."_details` TEXT NOT NULL;
+                ALTER TABLE `daily_business_ledger_v2` ADD COLUMN IF NOT EXISTS `t_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger_v2` ADD COLUMN IF NOT EXISTS `t_".$item->id."_details` TEXT NOT NULL;
+                ALTER TABLE `daily_business_ledger_v2` ADD COLUMN IF NOT EXISTS `ex_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `daily_business_ledger_v2` ADD COLUMN IF NOT EXISTS `ex_".$item->id."_details` TEXT NOT NULL;
+
+                ALTER TABLE `monthly_business_ledger_new` ADD COLUMN IF NOT EXISTS `p_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `monthly_business_ledger_new` ADD COLUMN IF NOT EXISTS `p_".$item->id."_details` TEXT NOT NULL;
+                ALTER TABLE `monthly_business_ledger_new` ADD COLUMN IF NOT EXISTS `t_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `monthly_business_ledger_new` ADD COLUMN IF NOT EXISTS `t_".$item->id."_details` TEXT NOT NULL;
+                ALTER TABLE `monthly_business_ledger_new` ADD COLUMN IF NOT EXISTS `ex_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `monthly_business_ledger_new` ADD COLUMN IF NOT EXISTS `ex_".$item->id."_details` TEXT NOT NULL;
             ";
         } else {
             $sql = "
+                ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `p_".$item->id."`;
+                ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `p_".$item->id."_details`;
+                ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `t_".$item->id."`;
+                ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `t_".$item->id."_details`;
                 ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `ex_".$item->id."`;
                 ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `ex_".$item->id."_details`;
+                
+                ALTER TABLE `daily_business_ledger_v2` DROP COLUMN IF EXISTS `p_".$item->id."`;
+                ALTER TABLE `daily_business_ledger_v2` DROP COLUMN IF EXISTS `p_".$item->id."_details`;
+                ALTER TABLE `daily_business_ledger_v2` DROP COLUMN IF EXISTS `t_".$item->id."`;
+                ALTER TABLE `daily_business_ledger_v2` DROP COLUMN IF EXISTS `t_".$item->id."_details`;
+                ALTER TABLE `daily_business_ledger_v2` DROP COLUMN IF EXISTS `ex_".$item->id."`;
+                ALTER TABLE `daily_business_ledger_v2` DROP COLUMN IF EXISTS `ex_".$item->id."_details`;
+                
+                ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `p_".$item->id."`;
+                ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `p_".$item->id."_details`;
+                ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `t_".$item->id."`;
+                ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `t_".$item->id."_details`;
+                ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `ex_".$item->id."`;
+                ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `ex_".$item->id."_details`;
             ";
         }
         Yii::$app->db->createCommand($sql)->execute();
