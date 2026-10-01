@@ -259,12 +259,13 @@ class ReportsController extends Controller
                 GROUP BY DATE(s.date_sold)
             )
             SELECT 
-               ud.sales_date AS date,
-               COALESCE(cs.total_puhunan, 0) AS puhunan,
-               COALESCE(cs.total_tubo, 0) AS tubo,
-               COALESCE(cs.total_sales, 0) AS total_sales
+                ud.sales_date AS date,
+                COALESCE(cs.total_puhunan, 0) AS puhunan,
+                COALESCE(cs.total_tubo, 0) AS tubo,
+                COALESCE(cs.total_sales, 0) AS total_sales
             FROM unique_dates ud
             LEFT JOIN daily_sales cs ON ud.sales_date = cs.sales_date
+            WHERE cs.total_sales > 0
             ORDER BY date DESC;
         ";
 
