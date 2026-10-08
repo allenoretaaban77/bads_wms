@@ -110,7 +110,8 @@ class InventoryController extends Controller
             'rack' => $request->get('rack'),
             'shelf' => $request->get('shelf'),
             'box' => $request->get('box'),
-            // 'status' => $request->get('status'),
+            'monitored' => $request->get('monitored'),
+            'substrates' => $request->get('substrates'),
             'record_status' => $request->get('record_status'),
         ];
         foreach ($filters as $field => $value) {
@@ -118,7 +119,6 @@ class InventoryController extends Controller
                 $query->andWhere([$field => $value]);
             }
         }
-
         $filters = [
             'status' => $request->get('status'),
         ];
@@ -1102,7 +1102,7 @@ class InventoryController extends Controller
                 ALTER TABLE `monitored_monthly_ledger` ADD COLUMN IF NOT EXISTS `to_".$item->id."` FLOAT NOT NULL DEFAULT '0';
             ";
         } else {
-            $sql = "
+            /* $sql = "
                 -- ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `p_".$item->id."`;
                 -- ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `p_".$item->id."_details`;
                 -- ALTER TABLE `daily_business_ledger` DROP COLUMN IF EXISTS `t_".$item->id."`;
@@ -1123,6 +1123,25 @@ class InventoryController extends Controller
                 -- ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `t_".$item->id."_details`;
                 -- ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `ex_".$item->id."`;
                 -- ALTER TABLE `monthly_business_ledger_new` DROP COLUMN IF EXISTS `ex_".$item->id."_details`;
+            "; */
+        }
+        if ((int) $item->substrates == 1) {
+            $sql = "
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `i_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `p_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `t_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `e_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `r_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `g_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_daily_ledger` ADD COLUMN IF NOT EXISTS `to_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `i_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `p_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `t_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `e_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `r_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `g_".$item->id."` FLOAT NOT NULL DEFAULT '0';
+                ALTER TABLE `substrates_monthly_ledger` ADD COLUMN IF NOT EXISTS `to_".$item->id."` FLOAT NOT NULL DEFAULT '0';
             ";
         }
         Yii::$app->db->createCommand($sql)->execute();
