@@ -31,6 +31,7 @@ use Yii;
  * @property string|null $record_status
  * @property string|null $tracking_method
  * @property int|null $monitored
+ * @property int|null $substrates
  */
 class Inventory extends \yii\db\ActiveRecord
 {
@@ -59,8 +60,8 @@ class Inventory extends \yii\db\ActiveRecord
             [['total_sold'], 'default', 'value' => 0],
             [['record_status'], 'default', 'value' => 'active'],
             //[['product_name', 'sku', 'cost_per_unit', 'price_per_unit', 'reorder_level', 'current_qty_x', 'type', 'rack', 'shelf', 'box', 'status_x', 'remarks'], 'required'],
-            [['product_name', 'type', 'cost_per_unit', 'price_per_unit', 'reorder_level', 'tracking_method', 'monitored'], 'required'],
-            [['added_by', 'updated_by', 'monitored'], 'integer'],
+            [['product_name', 'type', 'cost_per_unit', 'price_per_unit', 'reorder_level', 'tracking_method', 'monitored', 'substrates'], 'required'],
+            [['added_by', 'updated_by', 'monitored', 'substrates'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
             [['record_status', 'remarks', 'tracking_method'], 'string'],
             [['product_name', 'hash'], 'string', 'max' => 255],
@@ -103,6 +104,7 @@ class Inventory extends \yii\db\ActiveRecord
             'record_status' => 'Record Status',
             'tracking_method' => 'Tracking Method',
             'monitored' => 'Monitored',
+            'substrates' => 'Substrates',
         ];
     }
 

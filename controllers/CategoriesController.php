@@ -100,7 +100,7 @@ class CategoriesController extends Controller
 
         // 📄 Pagination
         $page = (int)$request->get('page', 1);
-        $pageSize = (int)$request->get('pageSize', 10);
+        $pageSize = (int)$request->get('pageSize', 20);
         $offset = ($page - 1) * $pageSize;
 
         // 📊 Sorting (default id ASC)
