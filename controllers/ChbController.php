@@ -11,7 +11,7 @@ use yii\filters\VerbFilter;
 use yii\db\Expression;
 use app\models\Employee; 
 
-class MonitoredController extends Controller
+class ChbController extends Controller
 {
     public $enableCsrfValidation = false;
 
@@ -94,6 +94,48 @@ class MonitoredController extends Controller
         return $d;
     }
 
+    public function actionGetmonthlychbledger() 
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.chb = 1";
+        $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
+        $additionalHeader = [];
+        $chbIds = [];
+
+        $tableHeader = [
+            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
+            ["title"=>"Month","name"=>"date","align"=>"left","class"=>"w-40"],
+            ["title"=>"Initial CHB 4","name"=>"initial","align"=>"right","class"=>"w-40"],
+            ["title"=>"Final CHB 4","name"=>"final","align"=>"right","class"=>"w-40"],
+            ["title"=>"Initial CHB 5","name"=>"initial","align"=>"right","class"=>"w-40"],
+            ["title"=>"Final CHB 5","name"=>"final","align"=>"right","class"=>"w-40"],
+            ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
+        ];
+        array_splice($tableHeader, 5, 0, $additionalHeader);
+
+        $sql = "
+            SELECT 
+                *, 
+                DATE_FORMAT(date, '%M, %Y') AS date,
+                DATE_FORMAT(date, '%m, %Y') AS date_value
+            FROM chb_monthly_ledger;
+        ";
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
+
+        return [
+            'data' => $data,
+            'chb_items' => $dataInventory,
+            'count' => count($data),
+            'mids' => $dataInventory,
+            'success' => true,
+            'headers' => json_encode($tableHeader),
+        ];      
+    }
+
     public function actionUpdatereportmonthly()
     {
         Yii::$app->response->format = \yii\web\Response::FORMAT_JSON;
@@ -106,15 +148,13 @@ class MonitoredController extends Controller
         $inputDate = Yii::$app->request->getBodyParam('date');
 
         // Get initial running parameters if passed via request body
-        $initalCement     = Yii::$app->request->getBodyParam('initial_cement');
-        $initialRSB10     = Yii::$app->request->getBodyParam('initial_rsb_10');
-        $initialRSB12     = Yii::$app->request->getBodyParam('initial_rsb_12');
-        $initialRSB16     = Yii::$app->request->getBodyParam('initial_rsb_16');
+        $initialChb4   = Yii::$app->request->getBodyParam('initial_chb4');
+        $initialChb5   = Yii::$app->request->getBodyParam('initial_chb5');
 
-        return $this->processReportMonthly($inputDate, $initalCement, $initialRSB10, $initialRSB12, $initialRSB16);
+        return $this->processReportMonthly($inputDate, $initialChb4, $initialChb5);
     }
 
-    public function processReportMonthly($inputDate, $initalCement, $initialRSB10, $initialRSB12, $initialRSB16) 
+    public function processReportMonthly($inputDate, $initialChb4, $initialChb5) 
     {
         $userId = !Yii::$app->user->isGuest ? Yii::$app->user->id : 0;
 
@@ -128,14 +168,12 @@ class MonitoredController extends Controller
         $endDate = $endDateTime->format('Y-m-01');
 
         // Fallback: Query ending balances from the day BEFORE start_date
-        if ($initalCement === null || $initialRSB10 === null || $initialRSB12 === null || $initialRSB16 === null) {
+        if ($initialChb4 === null || $initialChb5 === null) {
             Yii::$app->response->statusCode = 400;
             return ['error' => 'Initial values parameter is required'];
         } else {
-            $runningCement          = (float)$initalCement;
-            $runningRSB10           = (float)$initialRSB10;
-            $runningRSB12           = (float)$initialRSB12;
-            $runningRSB16           = (float)$initialRSB16;
+            $runningChb4          = (float)$initialChb4;
+            $runningChb5          = (float)$initialChb5;
         }
 
         $transaction = Yii::$app->db->beginTransaction();
@@ -143,15 +181,15 @@ class MonitoredController extends Controller
         try {
             // 1. 
             $deleteSql = Yii::$app->db->createCommand("
-                DELETE FROM monitored_daily_snapshots
+                DELETE FROM chb_daily_snapshots
                 WHERE report_date >= :start_date AND report_date < :end_date
             ")->bindValue(':start_date', $startDate)
               ->bindValue(':end_date', $endDate)
               ->execute();
 
             // 2. 
-            $monitoredDailySnapshotsInserts = Yii::$app->db->createCommand("
-                INSERT INTO monitored_daily_snapshots
+            $chbDailySnapshotsInserts = Yii::$app->db->createCommand("
+                INSERT INTO chb_daily_snapshots
                     (report_date, inventory_id, source_type, category_type, source_item_id, puhunan, tubo, total_sales)
                 SELECT 
                     DATE(s.date_sold) AS report_date,
@@ -166,7 +204,7 @@ class MonitoredController extends Controller
                 JOIN sales_items si ON s.id = si.sales_id
                 LEFT JOIN inventory i ON si.inventory_id = i.id
                 WHERE s.date_sold >= :start_date AND s.date_sold < :end_date
-                  AND s.status = 'approved' AND s.is_paid = 'yes' AND i.monitored = 1
+                  AND s.status = 'approved' AND s.is_paid = 'yes' AND i.chb = 1
                 ORDER BY s.date_sold ASC, si.id ASC
                 ON DUPLICATE KEY UPDATE 
                     puhunan = VALUES(puhunan), 
@@ -187,7 +225,7 @@ class MonitoredController extends Controller
                 FROM 
                 (
                     SELECT DATE(mds.report_date) AS report_date, mds.inventory_id
-                    FROM monitored_daily_snapshots mds
+                    FROM chb_daily_snapshots mds
                     
                     UNION
                     
@@ -206,7 +244,7 @@ class MonitoredController extends Controller
                         mds.inventory_id,
                         SUM(mds.puhunan) AS puhunan,
                         SUM(mds.tubo) AS tubo
-                    FROM monitored_daily_snapshots mds
+                    FROM chb_daily_snapshots mds
                     GROUP BY DATE(mds.report_date), mds.inventory_id
                 ) xs ON d.report_date = xs.report_date AND d.inventory_id = xs.inventory_id
 
@@ -225,32 +263,32 @@ class MonitoredController extends Controller
 
                 WHERE d.report_date >= :start_date 
                   AND d.report_date < :end_date 
-                  AND i.monitored = 1
+                  AND i.chb = 1
                 ORDER BY d.report_date ASC, d.inventory_id ASC;
             ")->bindValue(':start_date', $startDate)
               ->bindValue(':end_date', $endDate)
               ->queryAll();
 
             $salesByDate = [];
-            $monitoredByInventory = [];
+            $chbByInventory = [];
             foreach ($dailyAggregates as $row) {
                 $salesByDate[$row['report_date']] = $row;
 
                 $invId   = (int)$row['inventory_id'];
                 $repDate = $row['report_date'];
 
-                if (!isset($monitoredByInventory[$invId])) {
-                    $monitoredByInventory[$invId] = [];
+                if (!isset($chbByInventory[$invId])) {
+                    $chbByInventory[$invId] = [];
                 }
 
-                $monitoredByInventory[$invId][$repDate] = [
+                $chbByInventory[$invId][$repDate] = [
                     'puhunan' => (float)$row['puhunan'],
                     'tubo' => (float)$row['tubo'],
                     'expenses' => (float)$row['expenses'],
                 ];
 
-                // if (!in_array($invId, $monitoredInventoryIds)) {
-                //     $monitoredInventoryIds[] = $invId;
+                // if (!in_array($invId, $chbInventoryIds)) {
+                //     $chbInventoryIds[] = $invId;
                 // }
             }
 
@@ -267,8 +305,8 @@ class MonitoredController extends Controller
                 'updated_by = :updated_by',
             ];
 
-            $monitoredInventoryIds = [21,1421,1422,1423];
-            foreach ($monitoredInventoryIds as $invId) {
+            $chbInventoryIds = [309, 310];
+            foreach ($chbInventoryIds as $invId) {
                 $iCol = "i_{$invId}";
                 $pCol = "p_{$invId}";
                 $tCol = "t_{$invId}";
@@ -303,7 +341,7 @@ class MonitoredController extends Controller
             }
 
             $sqlUpsertDay = "
-                INSERT INTO monitored_daily_ledger (
+                INSERT INTO chb_daily_ledger (
                     " . implode(', ', $insertCols) . "
                 ) VALUES (
                     " . implode(', ', $insertValues) . "
@@ -324,9 +362,9 @@ class MonitoredController extends Controller
                 $bindParams[':created_by'] = $userId;
                 $bindParams[':updated_by'] = $userId;
 
-                $monitoredPuhunan   = 0.00;
-                $monitoredTubo      = 0.00;
-                foreach ($monitoredInventoryIds as $invId) {
+                $chbPuhunan   = 0.00;
+                $chbTubo      = 0.00;
+                foreach ($chbInventoryIds as $invId) {
                     $iCol   = "i_{$invId}";
                     $pCol   = "p_{$invId}";
                     $tCol   = "t_{$invId}";
@@ -339,10 +377,10 @@ class MonitoredController extends Controller
                     $monPuhunan     = 0.00;
                     $monTubo        = 0.00;
                     $monExpenses    = 0.00;
-                    if (isset($monitoredByInventory[$invId][$dateStr])) {
-                        $monPuhunan     = $monitoredByInventory[$invId][$dateStr]['puhunan'];
-                        $monTubo        = $monitoredByInventory[$invId][$dateStr]['tubo'];
-                        $monExpenses    = $monitoredByInventory[$invId][$dateStr]['expenses'];
+                    if (isset($chbByInventory[$invId][$dateStr])) {
+                        $monPuhunan     = $chbByInventory[$invId][$dateStr]['puhunan'];
+                        $monTubo        = $chbByInventory[$invId][$dateStr]['tubo'];
+                        $monExpenses    = $chbByInventory[$invId][$dateStr]['expenses'];
                     }
 
                     $bindParams[":{$iCol}"]     = 0;
@@ -353,31 +391,19 @@ class MonitoredController extends Controller
                     $bindParams[":{$gCol}"]     = 0;
                     $bindParams[":{$toCol}"]    = 0;
 
-                    $monitoredPuhunan           += $monPuhunan;
-                    $monitoredTubo              += $monTubo;
+                    $chbPuhunan           += $monPuhunan;
+                    $chbTubo              += $monTubo;
 
-                    if ($invId == 21) {
-                        $bindParams[":{$iCol}"] = $runningCement;
-                        $bindParams[":{$rCol}"] = $runningCement + $monPuhunan - $monExpenses;
-                        $runningCement          += $monPuhunan - $monExpenses;
+                    if ($invId == 309) {
+                        $bindParams[":{$iCol}"] = $runningChb4;
+                        $bindParams[":{$rCol}"] = $runningChb4 + $monPuhunan - $monExpenses;
+                        $runningChb4            += $monPuhunan - $monExpenses;
                     } 
 
-                    if ($invId == 1421) {
-                        $bindParams[":{$iCol}"] = $runningRSB10;
-                        $bindParams[":{$rCol}"] = $runningRSB10 + $monPuhunan - $monExpenses;
-                        $runningRSB10           += $monPuhunan - $monExpenses;
-                    } 
-
-                    if ($invId == 1422) {
-                        $bindParams[":{$iCol}"] = $runningRSB12;
-                        $bindParams[":{$rCol}"] = $runningRSB12 + $monPuhunan - $monExpenses;
-                        $runningRSB12           += $monPuhunan - $monExpenses;
-                    } 
-
-                    if ($invId == 1423) {
-                        $bindParams[":{$iCol}"] = $runningRSB16;
-                        $bindParams[":{$rCol}"] = $runningRSB16 + $monPuhunan - $monExpenses;
-                        $runningRSB16           += $monPuhunan - $monExpenses;
+                    if ($invId == 310) {
+                        $bindParams[":{$iCol}"] = $runningChb5;
+                        $bindParams[":{$rCol}"] = $runningChb5 + $monPuhunan - $monExpenses;
+                        $runningChb5            += $monPuhunan - $monExpenses;
                     } 
                 }
 
@@ -388,135 +414,77 @@ class MonitoredController extends Controller
 
             // 6.
             Yii::$app->db->createCommand("
-                INSERT INTO monitored_monthly_ledger (
+                INSERT INTO chb_monthly_ledger (
                     date,
-                    i_21,
-                    p_21,
-                    t_21,
-                    e_21,
-                    r_21,
-                    g_21,
-                    to_21,
-                    i_1421,
-                    p_1421,
-                    t_1421,
-                    e_1421,
-                    r_1421,
-                    g_1421,
-                    to_1421,
-                    i_1422,
-                    p_1422,
-                    t_1422,
-                    e_1422,
-                    r_1422,
-                    g_1422,
-                    to_1422,
-                    i_1423,
-                    p_1423,
-                    t_1423,
-                    e_1423,
-                    r_1423,
-                    g_1423,
-                    to_1423,
+                    i_309,
+                    p_309,
+                    t_309,
+                    e_309,
+                    r_309,
+                    g_309,
+                    to_309,
+                    i_310,
+                    p_310,
+                    t_310,
+                    e_310,
+                    r_310,
+                    g_310,
+                    to_310,
                     created_by,
                     updated_by
                 ) VALUES (
                     :date,
-                    :initial_cement,
-                    :puhunan_cement,
-                    :tubo_cement,
-                    :expenses_cement,
-                    :running_cement,
-                    :grand_cement,
-                    :total_cement,
-                    :initial_rsb_10,
-                    :puhunan_rsb_10,
-                    :tubo_rsb_10,
-                    :expenses_rsb_10,
-                    :running_rsb_10,
-                    :grand_rsb_10,
-                    :total_rsb_10,
-                    :initial_rsb_12,
-                    :puhunan_rsb_12,
-                    :tubo_rsb_12,
-                    :expenses_rsb_12,
-                    :running_rsb_12,
-                    :grand_rsb_12,
-                    :total_rsb_12,
-                    :initial_rsb_16,
-                    :puhunan_rsb_16,
-                    :tubo_rsb_16,
-                    :expenses_rsb_16,
-                    :running_rsb_16,
-                    :grand_rsb_16,
-                    :total_rsb_16,
+                    :initial_chb4,
+                    :puhunan_chb4,
+                    :tubo_chb4,
+                    :expenses_chb4,
+                    :running_chb4,
+                    :grand_chb4,
+                    :total_chb4,
+                    :initial_chb5,
+                    :puhunan_chb5,
+                    :tubo_chb5,
+                    :expenses_chb5,
+                    :running_chb5,
+                    :grand_chb5,
+                    :total_chb5,
                     :created_by,
                     :updated_by
                 )
                 ON DUPLICATE KEY UPDATE
-                    i_21                    = VALUES(i_21),
-                    p_21                    = VALUES(p_21),
-                    t_21                    = VALUES(t_21),
-                    e_21                    = VALUES(e_21),
-                    r_21                    = VALUES(r_21),
-                    g_21                    = VALUES(g_21),
-                    to_21                   = VALUES(to_21),
-                    i_1421                  = VALUES(i_1421),
-                    p_1421                  = VALUES(p_1421),
-                    t_1421                  = VALUES(t_1421),
-                    e_1421                  = VALUES(e_1421),
-                    r_1421                  = VALUES(r_1421),
-                    g_1421                  = VALUES(g_1421),
-                    to_1421                 = VALUES(to_1421),
-                    i_1422                  = VALUES(i_1422),
-                    p_1422                  = VALUES(p_1422),
-                    t_1422                  = VALUES(t_1422),
-                    e_1422                  = VALUES(e_1422),
-                    r_1422                  = VALUES(r_1422),
-                    g_1422                  = VALUES(g_1422),
-                    to_1422                 = VALUES(to_1422),
-                    i_1423                  = VALUES(i_1423),
-                    p_1423                  = VALUES(p_1423),
-                    t_1423                  = VALUES(t_1423),
-                    e_1423                  = VALUES(e_1423),
-                    r_1423                  = VALUES(r_1423),
-                    g_1423                  = VALUES(g_1423),
-                    to_1423                 = VALUES(to_1423),
-                    updated_by              = VALUES(updated_by);
+                    i_309                  = VALUES(i_309),
+                    p_309                  = VALUES(p_309),
+                    t_309                  = VALUES(t_309),
+                    e_309                  = VALUES(e_309),
+                    r_309                  = VALUES(r_309),
+                    g_309                  = VALUES(g_309),
+                    to_309                 = VALUES(to_309),
+                    i_310                  = VALUES(i_310),
+                    p_310                  = VALUES(p_310),
+                    t_310                  = VALUES(t_310),
+                    e_310                  = VALUES(e_310),
+                    r_310                  = VALUES(r_310),
+                    g_310                  = VALUES(g_310),
+                    to_310                 = VALUES(to_310),
+                    updated_by             = VALUES(updated_by);
             ")->bindValues([
                 ':date'                     => $startDate,
 
-                ':initial_cement'           => $initalCement,
-                ':puhunan_cement'           => 0,
-                ':tubo_cement'              => 0,
-                ':expenses_cement'          => 0,
-                ':running_cement'           => $runningCement,
-                ':grand_cement'             => 0,
-                ':total_cement'             => 0,
+                ':initial_chb4'           => $initialChb4,
+                ':puhunan_chb4'           => 0,
+                ':tubo_chb4'              => 0,
+                ':expenses_chb4'          => 0,
+                ':running_chb4'           => $runningChb4,
+                ':grand_chb4'             => 0,
+                ':total_chb4'             => 0,
 
-                ':initial_rsb_10'           => $initialRSB10,
-                ':puhunan_rsb_10'           => 0,
-                ':tubo_rsb_10'              => 0,
-                ':expenses_rsb_10'          => 0,
-                ':running_rsb_10'           => $runningRSB10,
-                ':grand_rsb_10'             => 0,
-                ':total_rsb_10'             => 0,
-                
-                ':initial_rsb_12'           => $initialRSB12,
-                ':puhunan_rsb_12'           => 0,
-                ':tubo_rsb_12'              => 0,
-                ':expenses_rsb_12'          => 0,
-                ':running_rsb_12'           => $runningRSB12,
-                ':grand_rsb_12'             => 0,
-                ':total_rsb_12'             => 0,
-                
-                ':initial_rsb_16'           => $initialRSB16,
-                ':puhunan_rsb_16'           => 0,
-                ':tubo_rsb_16'              => 0,
-                ':expenses_rsb_16'          => 0,
-                ':running_rsb_16'           => $runningRSB16,
-                ':grand_rsb_16'             => 0,
-                ':total_rsb_16'             => 0,
+                ':initial_chb5'           => $initialChb5,
+                ':puhunan_chb5'           => 0,
+                ':tubo_chb5'              => 0,
+                ':expenses_chb5'          => 0,
+                ':running_chb5'           => $runningChb5,
+                ':grand_chb5'             => 0,
+                ':total_chb5'             => 0,
 
                 ':created_by'               => $userId,
                 ':updated_by'               => $userId,
@@ -553,53 +521,7 @@ class MonitoredController extends Controller
         }
     }
 
-    public function actionGetmonthlymonitoredledger() 
-    {
-        if (Yii::$app->request->method !== 'GET') {
-            Yii::$app->response->statusCode = 405;
-            return ['error' => 'Method not allowed'];
-        }
-
-        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.monitored = 1";
-        $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
-        $additionalHeader = [];
-        $monitoredIds = [];
-
-        $tableHeader = [
-            ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
-            ["title"=>"Month","name"=>"date","align"=>"left","class"=>"w-40"],
-            ["title"=>"Initial Cement","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final Cement","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Initial RSB 10","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final RSB 10","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Initial RSB 12","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final RSB 12","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Initial RSB 16","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final RSB 16","name"=>"puhunan","align"=>"right","class"=>"w-40"],
-            ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
-        ];
-        array_splice($tableHeader, 5, 0, $additionalHeader);
-
-        $sql = "
-            SELECT 
-                *, 
-                DATE_FORMAT(date, '%M, %Y') AS date,
-                DATE_FORMAT(date, '%m, %Y') AS date_value
-            FROM monitored_monthly_ledger;
-        ";
-        $data = Yii::$app->db->createCommand($sql)->queryAll();
-
-        return [
-            'data' => $data,
-            'monitored_items' => $dataInventory,
-            'count' => count($data),
-            'mids' => $dataInventory,
-            'success' => true,
-            'headers' => json_encode($tableHeader),
-        ];      
-    }
-
-    public function actionGetdailymonitoredledger() 
+    public function actionGetdailychbledger() 
     {
         if (Yii::$app->request->method !== 'GET') {
             Yii::$app->response->statusCode = 405;
@@ -613,125 +535,54 @@ class MonitoredController extends Controller
         $endDateTime = (clone $d)->modify('first day of next month');
         $endDate = $endDateTime->format('Y-m-01');
 
-        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.monitored = 1";
+        $sqlInventory = "SELECT * FROM inventory AS i WHERE i.chb = 1";
         $dataInventory = Yii::$app->db->createCommand($sqlInventory)->queryAll();
         $additionalHeader = [];
-        $monitoredIds = [];
+        $chbIds = [];
         foreach ($dataInventory as $item) {
             $additionalHeader[] = ["title"=>"P - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
             $additionalHeader[] = ["title"=>"T - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
             // $additionalHeader[] = ["title"=>"Ex - ".ucwords(strtolower($item["product_name"])),"name"=>"","align"=>"right","class"=>"w-28"];
-            $monitoredIds[] = $item["id"];
+            $chbIds[] = $item["id"];
         }
 
         $tableHeader = [
             ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
             ["title"=>"Date","name"=>"date","align"=>"left","class"=>"w-40"],
-            ["title"=>"Tubo Cement","name"=>"tubo_cement","align"=>"right","class"=>"w-28"],
-            ["title"=>"Puhunan Cement","name"=>"puhunan_cement","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses Cement","name"=>"expenses_cement","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance Cement","name"=>"running_balance_cement","align"=>"right","class"=>"w-28"],
-            ["title"=>"Tubo RSB10","name"=>"tubo_rsb10","align"=>"right","class"=>"w-28"],
-            ["title"=>"Puhunan RSB10","name"=>"puhunan_rsb10","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses RSB10","name"=>"expenses_rsb10","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance RSB10","name"=>"running_balance_rsb10","align"=>"right","class"=>"w-28"],
-            ["title"=>"Tubo RSB12","name"=>"tubo_rsb12","align"=>"right","class"=>"w-28"],
-            ["title"=>"Puhunan RSB12","name"=>"puhunan_rsb12","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses RSB12","name"=>"expenses_rsb12","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance RSB12","name"=>"running_balance_rsb12","align"=>"right","class"=>"w-28"],
-            ["title"=>"Tubo RSB16","name"=>"tubo_rsb16","align"=>"right","class"=>"w-28"],
-            ["title"=>"Puhunan RSB16","name"=>"puhunan_rsb16","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses RSB16","name"=>"expenses_rsb16","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance RSB16","name"=>"running_balance_rsb16","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo Chb4","name"=>"tubo_chb4","align"=>"right","class"=>"w-28"],
+            ["title"=>"Puhunan Chb4","name"=>"puhunan_chb4","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses Chb4","name"=>"expenses_chb4","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance Chb4","name"=>"running_balance_chb4","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo Chb5","name"=>"tubo_chb5","align"=>"right","class"=>"w-28"],
+            ["title"=>"Puhunan Chb5","name"=>"puhunan_chb5","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses Chb5","name"=>"expenses_chb5","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance Chb5","name"=>"running_balance_chb5","align"=>"right","class"=>"w-28"],
             // ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
         ];
         // array_splice($tableHeader, 5, 0, $additionalHeader);
 
         $sql = "
-            SELECT * FROM monitored_daily_ledger 
+            SELECT * FROM chb_daily_ledger 
             WHERE date >= '$startDate' AND date < '$endDate' 
             ORDER BY date DESC;
         ";
         $data = Yii::$app->db->createCommand($sql)->queryAll();
 
-        // $sqlTotals = "
-        //     SELECT 
-        //         COALESCE(SUM(dbl.puhunan), 0) AS puhunan,
-        //         COALESCE(SUM(dbl.tubo), 0) AS tubo,
-        //         COALESCE(SUM(dbl.total_sales), 0) AS total_sales,
-
-        //         COALESCE(SUM(dbl.p_21), 0) AS puhunan_cement,
-        //         COALESCE(SUM(dbl.t_21), 0) AS tubo_cement,
-
-        //         SUM(+ COALESCE(dbl.p_1421, 0) + COALESCE(dbl.p_1422, 0) + COALESCE(dbl.p_1423, 0)) AS puhunan_rsb,
-        //         SUM(+ COALESCE(dbl.t_1421, 0) + COALESCE(dbl.t_1422, 0) + COALESCE(dbl.t_1423, 0)) AS tubo_rsb,
-
-
-        //         COALESCE(SUM(dbl.puhunan), 0) AS puhunan,
-        //         DATE_FORMAT(report_date, '%M, %Y') AS group_date
-        //     FROM daily_business_ledger_v2 as dbl
-        //     WHERE report_date >= '$startDate' AND report_date < '$endDate'
-        //     GROUP BY group_date;
-        // ";
-        // $dataTotals = Yii::$app->db->createCommand($sqlTotals)->queryOne();
-
         $sqlMonth = "
             SELECT *
-            FROM monitored_monthly_ledger as mbl
+            FROM chb_monthly_ledger as mbl
             WHERE date >= '$startDate' AND date < '$endDate';
         ";
         $dataMonth = Yii::$app->db->createCommand($sqlMonth)->queryOne();
 
-        // if (empty($dataTotals)) {
-        //     return [
-        //         'success' => false,
-        //         'message' => 'No total data available',
-        //         'data' => $data,
-        //         'count' => 0,
-        //         'mids' => $dataInventory,
-        //         'headers' => json_encode($tableHeader),
-        //     ];
-        // }
-
         return [
             'data' => $data,
-            // 'mids' => $dataInventory,
             'count' => count($data),
             'success' => true,
             'headers' => json_encode($tableHeader),
 
-            'initialCement' => $dataMonth['i_21'],
-            'initialRSB10' => $dataMonth['i_1421'],
-            'initialRSB12' => $dataMonth['i_1422'],
-            'initialRSB16' => $dataMonth['i_1423'],
-
-            'finalCement' => $dataMonth['r_21'],
-            'finalRSB10' => $dataMonth['r_1421'],
-            'finalRSB12' => $dataMonth['r_1422'],
-            'finalRSB16' => $dataMonth['r_1423'],
-
-
-            // 'totalPuhunan' => $dataTotals['puhunan'],
-            // 'totalTubo' => $dataTotals['tubo'],
-            // 'totalSales' => $dataTotals['total_sales'],
-
-            // 'totalPuhunanCement' => $dataTotals['puhunan_cement'],
-            // 'totalTuboCement' => $dataTotals['tubo_cement'],
-
-            // 'totalPuhunanRSB' => $dataTotals['puhunan_rsb'],
-            // 'totalTuboRSB' => $dataTotals['tubo_rsb'],
-
-            // 'initialMoneyOnHand' => $dataMonth['initial_money_on_hand'],
-            // 'initialPuhunan' => $dataMonth['initial_puhunan'],
-            // 'initialTubo' => $dataMonth['initial_tubo'],
-
-            // 'finalMoneyOnHand' => $dataMonth['running_money_on_hand'],
-            // 'finalPuhunan' => $dataMonth['running_puhunan'],
-            // 'finalTubo' => $dataMonth['running_tubo'],
-            // 'reportId' => $dataMonth['id'],
-
-            // 'dataTotals' => $dataTotals,
-            // 'sql' => $sql,
+            'initialChb4' => $dataMonth['i_309'],
+            'initialChb5' => $dataMonth['i_310'],
         ];       
     }
 
@@ -788,7 +639,7 @@ class MonitoredController extends Controller
         try {
             // 1. Delete target month snapshots
             $deletedSnapshots = Yii::$app->db->createCommand("                 
-                DELETE FROM monitored_daily_snapshots                 
+                DELETE FROM chb_daily_snapshots                 
                 WHERE report_date >= :start_date AND report_date < :end_date             
             ")->bindValue(':start_date', $startDate)
             ->bindValue(':end_date', $endDate)
@@ -796,7 +647,7 @@ class MonitoredController extends Controller
 
             // 2. Delete daily business ledger records for the target month
             $deletedDailyLedger = Yii::$app->db->createCommand("                 
-                DELETE FROM gravel_daily_ledger                 
+                DELETE FROM chb_daily_ledger                 
                 WHERE date >= :start_date AND date < :end_date             
             ")->bindValue(':start_date', $startDate)
             ->bindValue(':end_date', $endDate)
@@ -804,7 +655,7 @@ class MonitoredController extends Controller
 
             // 3. Delete monthly business ledger summary record
             $deletedMonthlyLedger = Yii::$app->db->createCommand("
-                DELETE FROM monitored_monthly_ledger
+                DELETE FROM chb_monthly_ledger
                 WHERE `date` = :start_date
             ")->bindValue(':start_date', $startDate)
             ->execute();
@@ -813,7 +664,7 @@ class MonitoredController extends Controller
 
             // ✅ Insert into audit log after successful delete
             Yii::$app->db->createCommand()->insert('audit_log', [
-                'entity' => 'monitored monthly report',
+                'entity' => 'chb monthly report',
                 'entity_id' => $id,
                 'action' => 'delete',
                 'old_data' => json_encode($deletedMonthlyLedger),
@@ -824,7 +675,7 @@ class MonitoredController extends Controller
 
             return [
                 'success' => true,
-                'message' => 'Monitored monthly ledger reports and daily records successfully deleted.',
+                'message' => 'CHB monthly ledger reports and daily records successfully deleted.',
                 'period'  => [
                     'start_date' => $startDate,
                     'end_date'   => date('Y-m-d', strtotime('-1 day', strtotime($endDate))),
@@ -840,8 +691,9 @@ class MonitoredController extends Controller
             Yii::$app->response->statusCode = 500;
             return [
                 'success' => false,
-                'error'   => 'Failed to delete monitored monthly ledger reports: ' . $e->getMessage()
+                'error'   => 'Failed to delete chb monthly ledger reports: ' . $e->getMessage()
             ];
         }
     }
+
 }

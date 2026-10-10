@@ -1129,7 +1129,8 @@ class SalesController extends Controller
                 new Expression('0 AS target_quantity')
             ])
             ->leftJoin('inventory_batches b', 'i.id = b.inventory_id')
-            ->where(['inventory_id' => $id]);
+            ->where(['inventory_id' => $id])
+            ->andWhere(['>', 'b.current_qty', 0]);
         $query->orderBy(['b.date_received' => SORT_DESC]);
         $totalCount = $query->count();
         $items = $query->asArray()->all();
