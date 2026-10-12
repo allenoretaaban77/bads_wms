@@ -135,7 +135,7 @@ class LedgersController extends Controller
                 LEFT JOIN inventory i ON si.inventory_id = i.id
                 WHERE s.date_sold >= :start_date AND s.date_sold < :end_date
                   AND s.status = 'approved' AND s.is_paid = 'yes'
-                  AND i.sand = 0 AND i.chb = 0 and i.gravel = 0
+                  AND (i.sand != 1 AND i.chb != 1 AND i.gravel != 1)
                 ORDER BY s.date_sold ASC, si.id ASC
                 ON DUPLICATE KEY UPDATE 
                     puhunan = VALUES(puhunan), 
