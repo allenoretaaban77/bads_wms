@@ -109,8 +109,14 @@ class SandController extends Controller
         $tableHeader = [
             ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
             ["title"=>"Month","name"=>"date","align"=>"left","class"=>"w-40"],
+            ["title"=>"Initial Gravel","name"=>"initial","align"=>"right","class"=>"w-40"],
+            ["title"=>"Final Gravel","name"=>"final","align"=>"right","class"=>"w-40"],
             ["title"=>"Initial White Sand","name"=>"initial","align"=>"right","class"=>"w-40"],
             ["title"=>"Final White Sand","name"=>"final","align"=>"right","class"=>"w-40"],
+            ["title"=>"Initial Sand Bistay","name"=>"initial","align"=>"right","class"=>"w-40"],
+            ["title"=>"Final Sand Bistay","name"=>"final","align"=>"right","class"=>"w-40"],
+            ["title"=>"Initial Sand Hindi Bistay","name"=>"initial","align"=>"right","class"=>"w-40"],
+            ["title"=>"Final Sand Hindi Bistay","name"=>"final","align"=>"right","class"=>"w-40"],
             ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
         ];
         array_splice($tableHeader, 5, 0, $additionalHeader);
@@ -146,12 +152,16 @@ class SandController extends Controller
         $inputDate = Yii::$app->request->getBodyParam('date');
 
         // Get initial running parameters if passed via request body
-        $initialSand   = Yii::$app->request->getBodyParam('initial_sand');
+        $initialGsData            = [];
+        $initialGsData[1898]      = Yii::$app->request->getBodyParam('initial_gravel');
+        $initialGsData[1897]      = Yii::$app->request->getBodyParam('initial_sand');
+        $initialGsData[1906]      = Yii::$app->request->getBodyParam('initial_sand_b');
+        $initialGsData[1907]      = Yii::$app->request->getBodyParam('initial_sand_h');
 
-        return $this->processReportMonthly($inputDate, $initialSand);
+        return $this->processReportMonthly($inputDate, $initialGsData);
     }
 
-    public function processReportMonthly($inputDate, $initialSand) 
+    public function processReportMonthly($inputDate, $initialGsData)
     {
         $userId = !Yii::$app->user->isGuest ? Yii::$app->user->id : 0;
 
@@ -165,11 +175,12 @@ class SandController extends Controller
         $endDate = $endDateTime->format('Y-m-01');
 
         // Fallback: Query ending balances from the day BEFORE start_date
-        if ($initialSand === null) {
+        $runningGsData = [];
+        if ($initialGsData === null) {
             Yii::$app->response->statusCode = 400;
             return ['error' => 'Initial values parameter is required'];
         } else {
-            $runningSand          = (float)$initialSand;
+            $runningGsData        = $initialGsData;
         }
 
         $transaction = Yii::$app->db->beginTransaction();
@@ -301,7 +312,7 @@ class SandController extends Controller
                 'updated_by = :updated_by',
             ];
 
-            $sandInventoryIds = [1897];
+            $sandInventoryIds = [1898,1897,1906,1907];
             foreach ($sandInventoryIds as $invId) {
                 $iCol = "i_{$invId}";
                 $pCol = "p_{$invId}";
@@ -387,14 +398,36 @@ class SandController extends Controller
                     $bindParams[":{$gCol}"]     = 0;
                     $bindParams[":{$toCol}"]    = 0;
 
-                    $sandPuhunan           += $monPuhunan;
-                    $sandTubo              += $monTubo;
+                    $sandPuhunan                += $monPuhunan;
+                    $sandTubo                   += $monTubo;
 
-                    if ($invId == 1897) {
-                        $bindParams[":{$iCol}"] = $runningSand;
-                        $bindParams[":{$rCol}"] = $runningSand + $monPuhunan - $monExpenses;
-                        $runningSand            += $monPuhunan - $monExpenses;
-                    } 
+                    $bindParams[":{$iCol}"]     = $runningGsData[$invId];
+                    $bindParams[":{$rCol}"]     = $runningGsData[$invId] + $monPuhunan - $monExpenses;
+                    $runningGsData[$invId]      += $monPuhunan - $monExpenses;
+
+                    // if ($invId == 1898) {
+                    //     $bindParams[":{$iCol}"] = $runningGsData[$invId];
+                    //     $bindParams[":{$rCol}"] = $runningGravel + $monPuhunan - $monExpenses;
+                    //     $runningGravel          += $monPuhunan - $monExpenses;
+                    // } 
+
+                    // if ($invId == 1897) {
+                    //     $bindParams[":{$iCol}"] = $runningSand;
+                    //     $bindParams[":{$rCol}"] = $runningSand + $monPuhunan - $monExpenses;
+                    //     $runningSand            += $monPuhunan - $monExpenses;
+                    // } 
+
+                    // if ($invId == 1906) {
+                    //     $bindParams[":{$iCol}"] = $runningSandB;
+                    //     $bindParams[":{$rCol}"] = $runningSandB + $monPuhunan - $monExpenses;
+                    //     $runningSandB            += $monPuhunan - $monExpenses;
+                    // } 
+
+                    // if ($invId == 1907) {
+                    //     $bindParams[":{$iCol}"] = $runningSandH;
+                    //     $bindParams[":{$rCol}"] = $runningSandH + $monPuhunan - $monExpenses;
+                    //     $runningSandH           += $monPuhunan - $monExpenses;
+                    // } 
                 }
 
                 $cmdUpsertDay->bindValues($bindParams)->execute();
@@ -403,53 +436,139 @@ class SandController extends Controller
             }
 
             // 6.
-            Yii::$app->db->createCommand("
-                INSERT INTO sand_monthly_ledger (
-                    date,
-                    i_1897,
-                    p_1897,
-                    t_1897,
-                    e_1897,
-                    r_1897,
-                    g_1897,
-                    to_1897,
-                    created_by,
-                    updated_by
-                ) VALUES (
-                    :date,
-                    :initial_sand,
-                    :puhunan_sand,
-                    :tubo_sand,
-                    :expenses_sand,
-                    :running_sand,
-                    :grand_sand,
-                    :total_sand,
-                    :created_by,
-                    :updated_by
-                )
-                ON DUPLICATE KEY UPDATE
-                    i_1897                  = VALUES(i_1897),
-                    p_1897                  = VALUES(p_1897),
-                    t_1897                  = VALUES(t_1897),
-                    e_1897                  = VALUES(e_1897),
-                    r_1897                  = VALUES(r_1897),
-                    g_1897                  = VALUES(g_1897),
-                    to_1897                 = VALUES(to_1897),
-                    updated_by             = VALUES(updated_by);
-            ")->bindValues([
-                ':date'                     => $startDate,
+            $columns = ['date'];
+            $values = [':date'];
+            $updates = [];
+            $params = [
+                ':date' => $startDate,
+                ':created_by' => $userId,
+                ':updated_by' => $userId,
+            ];
 
-                ':initial_sand'           => $initialSand,
-                ':puhunan_sand'           => 0,
-                ':tubo_sand'              => 0,
-                ':expenses_sand'          => 0,
-                ':running_sand'           => $runningSand,
-                ':grand_sand'             => 0,
-                ':total_sand'             => 0,
+            // Loop through each inventory ID to build columns, placeholders, and updates dynamically
+            foreach ($sandInventoryIds as $id) {
+                // Table columns
+                $columns[] = 'i_' . $id;
+                $columns[] = 'p_' . $id;
+                $columns[] = 't_' . $id;
+                $columns[] = 'e_' . $id;
+                $columns[] = 'r_' . $id;
+                $columns[] = 'g_' . $id;
+                $columns[] = 'to_' . $id;
 
-                ':created_by'               => $userId,
-                ':updated_by'               => $userId,
-            ])->execute();
+                // Value placeholders
+                $values[] = ':initial_' . $id;
+                $values[] = ':puhunan_' . $id;
+                $values[] = ':tubo_' . $id;
+                $values[] = ':expenses_' . $id;
+                $values[] = ':running_' . $id;
+                $values[] = ':grand_' . $id;
+                $values[] = ':total_' . $id;
+
+                // Bind default values (e.g., 0)
+                $params[':initial_' . $id] = $initialGsData[$id];
+                $params[':puhunan_' . $id] = 0;
+                $params[':tubo_' . $id] = 0;
+                $params[':expenses_' . $id] = 0;
+                $params[':running_' . $id] = $runningGsData[$id];
+                $params[':grand_' . $id] = 0;
+                $params[':total_' . $id] = 0;
+
+                // ON DUPLICATE KEY UPDATE mappings
+                $updates[] = 'i_' . $id . ' = VALUES(i_' . $id . ')';
+                $updates[] = 'p_' . $id . ' = VALUES(p_' . $id . ')';
+                $updates[] = 't_' . $id . ' = VALUES(t_' . $id . ')';
+                $updates[] = 'e_' . $id . ' = VALUES(e_' . $id . ')';
+                $updates[] = 'r_' . $id . ' = VALUES(r_' . $id . ')';
+                $updates[] = 'g_' . $id . ' = VALUES(g_' . $id . ')';
+                $updates[] = 'to_' . $id . ' = VALUES(to_' . $id . ')';
+            }
+
+            // Append audit columns
+            $columns[] = 'created_by';
+            $columns[] = 'updated_by';
+            $values[] = ':created_by';
+            $values[] = ':updated_by';
+            $updates[] = 'updated_by = VALUES(updated_by)';
+
+            // Assemble the final SQL string
+            $sql = "INSERT INTO sand_monthly_ledger (" . implode(', ', $columns) . ") 
+                    VALUES (" . implode(', ', $values) . ") 
+                    ON DUPLICATE KEY UPDATE " . implode(', ', $updates);
+
+            // Execute the command
+            Yii::$app->db->createCommand($sql)
+                ->bindValues($params)
+                ->execute();
+
+            // Yii::$app->db->createCommand("
+            //     INSERT INTO sand_monthly_ledger (
+            //         date,
+            //         i_1898,
+            //         p_1898,
+            //         t_1898,
+            //         e_1898,
+            //         r_1898,
+            //         g_1898,
+            //         to_1898,
+            //         i_1897,
+            //         p_1897,
+            //         t_1897,
+            //         e_1897,
+            //         r_1897,
+            //         g_1897,
+            //         to_1897,
+            //         i_1906,
+            //         p_1906,
+            //         t_1906,
+            //         e_1906,
+            //         r_1906,
+            //         g_1906,
+            //         to_1906,
+            //         i_1907,
+            //         p_1907,
+            //         t_1907,
+            //         e_1907,
+            //         r_1907,
+            //         g_1907,
+            //         to_1907,
+            //         created_by,
+            //         updated_by
+            //     ) VALUES (
+            //         :date,
+            //         :initial_1897,
+            //         :puhunan_1897,
+            //         :tubo_1897,
+            //         :expenses_1897,
+            //         :running_1897,
+            //         :grand_1897,
+            //         :total_1897,
+            //         :created_by,
+            //         :updated_by
+            //     )
+            //     ON DUPLICATE KEY UPDATE
+            //         i_1897                  = VALUES(i_1897),
+            //         p_1897                  = VALUES(p_1897),
+            //         t_1897                  = VALUES(t_1897),
+            //         e_1897                  = VALUES(e_1897),
+            //         r_1897                  = VALUES(r_1897),
+            //         g_1897                  = VALUES(g_1897),
+            //         to_1897                 = VALUES(to_1897),
+            //         updated_by             = VALUES(updated_by);
+            // ")->bindValues([
+            //     ':date'                     => $startDate,
+
+            //     ':initial_1897'           => 0,
+            //     ':puhunan_1897'           => 0,
+            //     ':tubo_1897'              => 0,
+            //     ':expenses_1897'          => 0,
+            //     ':running_1897'           => 0,
+            //     ':grand_1897'             => 0,
+            //     ':total_1897'             => 0,
+
+            //     ':created_by'               => $userId,
+            //     ':updated_by'               => $userId,
+            // ])->execute();
 
             $transaction->commit();
 
@@ -510,10 +629,22 @@ class SandController extends Controller
         $tableHeader = [
             ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
             ["title"=>"Date","name"=>"date","align"=>"left","class"=>"w-40"],
-            ["title"=>"Tubo Sand","name"=>"tubo_sand","align"=>"right","class"=>"w-28"],
-            ["title"=>"Puhunan Sand","name"=>"puhunan_sand","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses Sand","name"=>"expenses_sand","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance Sand","name"=>"running_balance_sand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo Gravel","name"=>"tubo_gravel","align"=>"right","class"=>"w-28"],
+            ["title"=>"Puhunan Gravel","name"=>"puhunan_gravel","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses Gravel","name"=>"expenses_gravel","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance Gravel","name"=>"running_balance_gravel","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo White Sand","name"=>"tubo_sand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Puhunan White Sand","name"=>"puhunan_sand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses White Sand","name"=>"expenses_sand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance White Sand","name"=>"running_balance_sand","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo Sand Bistay","name"=>"tubo_sand_b","align"=>"right","class"=>"w-28"],
+            ["title"=>"Puhunan Sand Bistay","name"=>"puhunan_sand_b","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses Sand Bistay","name"=>"expenses_sand_b","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance Sand Bistay","name"=>"running_balance_sand_b","align"=>"right","class"=>"w-28"],
+            ["title"=>"Tubo Sand Hindi Bistay","name"=>"tubo_sand_h","align"=>"right","class"=>"w-28"],
+            ["title"=>"Puhunan Sand Hindi Bistay","name"=>"puhunan_sand_h","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses Sand Hindi Bistay","name"=>"expenses_sand_h","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance Sand Hindi Bistay","name"=>"running_balance_sand_h","align"=>"right","class"=>"w-28"],
             // ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
         ];
         // array_splice($tableHeader, 5, 0, $additionalHeader);
@@ -538,7 +669,15 @@ class SandController extends Controller
             'success' => true,
             'headers' => json_encode($tableHeader),
 
-            'initialSand' => $dataMonth['i_1897'],
+            'initialGravel' => $dataMonth['i_1898'],
+            'initialSand'   => $dataMonth['i_1897'],
+            'initialSandB'  => $dataMonth['i_1906'],
+            'initialSandH'  => $dataMonth['i_1907'],
+
+            'finalGravel' => $dataMonth['r_1898'],
+            'finalSand'   => $dataMonth['r_1897'],
+            'finalSandB'  => $dataMonth['r_1906'],
+            'finalSandH'  => $dataMonth['r_1907'],
         ];       
     }
 
