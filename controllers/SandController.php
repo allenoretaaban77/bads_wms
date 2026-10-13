@@ -381,8 +381,6 @@ class SandController extends Controller
                 $bindParams[':created_by'] = $userId;
                 $bindParams[':updated_by'] = $userId;
 
-                $origItem = $origData[$dateStr];
-
                 $sandPuhunan   = 0.00;
                 $sandTubo      = 0.00;
                 foreach ($sandInventoryIds as $invId) {
@@ -394,6 +392,12 @@ class SandController extends Controller
                     $rCol   = "r_{$invId}";
                     $gCol   = "g_{$invId}";
                     $toCol  = "to_{$invId}";
+
+                    $exPenses = 0.00;
+                    if (isset($origData[$dateStr])) {
+                        $origItem = $origData[$dateStr];
+                        $exPenses = $origItem[$exCol];
+                    }
 
                     $monPuhunan     = 0.00;
                     $monTubo        = 0.00;
@@ -408,7 +412,7 @@ class SandController extends Controller
                     $bindParams[":{$pCol}"]     = $monPuhunan;
                     $bindParams[":{$tCol}"]     = $monTubo;
                     $bindParams[":{$eCol}"]     = $monExpenses;
-                    $bindParams[":{$exCol}"]    = $origItem[$exCol];
+                    $bindParams[":{$exCol}"]    = $exPenses;
                     $bindParams[":{$rCol}"]     = 0;
                     $bindParams[":{$gCol}"]     = 0;
                     $bindParams[":{$toCol}"]    = 0;
@@ -417,32 +421,8 @@ class SandController extends Controller
                     $sandTubo                   += $monTubo;
 
                     $bindParams[":{$iCol}"]     = $runningGsData[$invId];
-                    $bindParams[":{$rCol}"]     = $runningGsData[$invId] + $monPuhunan - $monExpenses - $origItem[$exCol];
-                    $runningGsData[$invId]      += $monPuhunan - $monExpenses - $origItem[$exCol];
-
-                    // if ($invId == 1898) {
-                    //     $bindParams[":{$iCol}"] = $runningGsData[$invId];
-                    //     $bindParams[":{$rCol}"] = $runningGravel + $monPuhunan - $monExpenses;
-                    //     $runningGravel          += $monPuhunan - $monExpenses;
-                    // } 
-
-                    // if ($invId == 1897) {
-                    //     $bindParams[":{$iCol}"] = $runningSand;
-                    //     $bindParams[":{$rCol}"] = $runningSand + $monPuhunan - $monExpenses;
-                    //     $runningSand            += $monPuhunan - $monExpenses;
-                    // } 
-
-                    // if ($invId == 1906) {
-                    //     $bindParams[":{$iCol}"] = $runningSandB;
-                    //     $bindParams[":{$rCol}"] = $runningSandB + $monPuhunan - $monExpenses;
-                    //     $runningSandB            += $monPuhunan - $monExpenses;
-                    // } 
-
-                    // if ($invId == 1907) {
-                    //     $bindParams[":{$iCol}"] = $runningSandH;
-                    //     $bindParams[":{$rCol}"] = $runningSandH + $monPuhunan - $monExpenses;
-                    //     $runningSandH           += $monPuhunan - $monExpenses;
-                    // } 
+                    $bindParams[":{$rCol}"]     = $runningGsData[$invId] + $monPuhunan - $monExpenses - $exPenses;
+                    $runningGsData[$invId]      += $monPuhunan - $monExpenses - $exPenses;
                 }
 
                 $cmdUpsertDay->bindValues($bindParams)->execute();
@@ -547,7 +527,7 @@ class SandController extends Controller
             Yii::$app->response->statusCode = 500;
             return [
                 'success' => false,
-                'error'   => 'Failed to update ledger reports: ' . $e->getMessage()
+                'error'   => 'Failed to update sand ledger reports: ' . $e->getMessage()
             ];
         }
     }
