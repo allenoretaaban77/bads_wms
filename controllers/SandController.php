@@ -613,6 +613,11 @@ class SandController extends Controller
             'finalSand'   => $dataMonth['r_1897'],
             'finalSandB'  => $dataMonth['r_1906'],
             'finalSandH'  => $dataMonth['r_1907'],
+
+            'total' => [
+                'initialTotal'  => (float)$dataMonth['i_1898'] + (float)$dataMonth['i_1897'] + (float)$dataMonth['i_1906'] + (float)$dataMonth['i_1907'],
+                'finalTotal'  => (float)$dataMonth['r_1898'] + (float)$dataMonth['r_1897'] + (float)$dataMonth['r_1906'] + (float)$dataMonth['r_1907']
+            ]
         ];       
     }
 
@@ -799,4 +804,48 @@ class SandController extends Controller
         }
     }
 
+    public function actionGetsandreplenishmentview() 
+    {
+        if (Yii::$app->request->method !== 'GET') {
+            Yii::$app->response->statusCode = 405;
+            return ['error' => 'Method not allowed'];
+        }
+
+        $date = Yii::$app->request->get('date');
+        $id = Yii::$app->request->get('item_id');
+
+        $data_inventory = Yii::$app->db->createCommand("SELECT * FROM inventory WHERE id = '$id';")->queryOne();
+        $data_summary = Yii::$app->db->createCommand("SELECT SUM(ri.total) as total FROM replenishment_items ri LEFT JOIN replenishment r ON r.id = ri.transaction_id WHERE r.date_received = '$date'  AND ri.inventory_id = '$id';")->queryOne();
+
+        $sql = "
+            SELECT
+                ri.id,
+                r.reference_no,
+                ri.cost_per_unit,
+                ri.qty_added,
+                ri.total,
+                r.supplier,
+                r.remarks,
+                i.product_name
+            FROM replenishment_items ri 
+            LEFT JOIN replenishment r
+            ON r.id = ri.transaction_id
+            LEFT JOIN inventory i
+            ON i.id = ri.inventory_id
+                WHERE r.date_received = '$date'  AND i.id = '$id'
+            ORDER BY r.reference_no ASC, ri.id ASC;
+        ";
+        $data = Yii::$app->db->createCommand($sql)->queryAll();
+
+        return [
+            'data' => $data,
+            'success' => true,
+            'summary' => [
+                'product_name' => $data_inventory['product_name'],
+                'count' => count($data),
+                'date' => $date,
+                'total' => $data_summary['total']
+            ]
+        ];       
+    }
 }
