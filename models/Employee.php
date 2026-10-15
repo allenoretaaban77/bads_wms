@@ -39,7 +39,7 @@ class Employee extends ActiveRecord implements \yii\web\IdentityInterface
     public function rules()
     {
         return [
-            [['employee_number', 'firstname', 'middlename', 'lastname', 'username'], 'required'],
+            [['employee_number', 'firstname', 'lastname', 'username'], 'required'],
             [['password'], 'required', 'on' => ['insert']],
             [['employee_id', 'status_id', 'position_id'], 'integer'],
             [['date_created', 'date_updated'], 'safe'],
