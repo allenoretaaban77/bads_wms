@@ -109,14 +109,15 @@ class SandController extends Controller
         $tableHeader = [
             ["title"=>"#","name"=>"id","align"=>"right","class"=>"w-10"],
             ["title"=>"Month","name"=>"date","align"=>"left","class"=>"w-40"],
-            ["title"=>"Initial Gravel","name"=>"initial","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final Gravel","name"=>"final","align"=>"right","class"=>"w-40"],
-            ["title"=>"Initial White Sand","name"=>"initial","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final White Sand","name"=>"final","align"=>"right","class"=>"w-40"],
-            ["title"=>"Initial Sand Bistay","name"=>"initial","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final Sand Bistay","name"=>"final","align"=>"right","class"=>"w-40"],
-            ["title"=>"Initial Sand Hindi Bistay","name"=>"initial","align"=>"right","class"=>"w-40"],
-            ["title"=>"Final Sand Hindi Bistay","name"=>"final","align"=>"right","class"=>"w-40"],
+            ["title"=>"Initial Puhunan","name"=>"initial","align"=>"right","class"=>"w-40"],
+            ["title"=>"Running Balance","name"=>"running","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Final Gravel","name"=>"final","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Initial White Sand","name"=>"initial","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Final White Sand","name"=>"final","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Initial Sand Bistay","name"=>"initial","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Final Sand Bistay","name"=>"final","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Initial Sand Hindi Bistay","name"=>"initial","align"=>"right","class"=>"w-40"],
+            // ["title"=>"Final Sand Hindi Bistay","name"=>"final","align"=>"right","class"=>"w-40"],
             ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
         ];
         array_splice($tableHeader, 5, 0, $additionalHeader);
@@ -153,10 +154,11 @@ class SandController extends Controller
 
         // Get initial running parameters if passed via request body
         $initialGsData            = [];
-        $initialGsData[1898]      = Yii::$app->request->getBodyParam('initial_gravel');
-        $initialGsData[1897]      = Yii::$app->request->getBodyParam('initial_sand');
-        $initialGsData[1906]      = Yii::$app->request->getBodyParam('initial_sand_b');
-        $initialGsData[1907]      = Yii::$app->request->getBodyParam('initial_sand_h');
+        $initialGsData[0]         = Yii::$app->request->getBodyParam('initial');
+        $initialGsData[1898]      = 0.00; // Yii::$app->request->getBodyParam('initial_gravel');
+        $initialGsData[1897]      = 0.00; // Yii::$app->request->getBodyParam('initial_sand');
+        $initialGsData[1906]      = 0.00; // Yii::$app->request->getBodyParam('initial_sand_b');
+        $initialGsData[1907]      = 0.00; // Yii::$app->request->getBodyParam('initial_sand_h');
 
         return $this->processReportMonthly($inputDate, $initialGsData);
     }
@@ -182,6 +184,7 @@ class SandController extends Controller
         } else {
             $runningGsData        = $initialGsData;
         }
+        $runningTotal = $runningGsData[0];
 
         $transaction = Yii::$app->db->beginTransaction();
 
@@ -301,18 +304,21 @@ class SandController extends Controller
 
             // 4. 
             $insertCols = [
-                'date', 'created_by'
+                'date', 'created_by', 'initial', 'running'
             ];
 
             $insertValues = [
-                ':date', ':created_by'
+                ':date', ':created_by', ':initial', ':running'
             ];
 
             $updateClauses = [
                 'updated_by = :updated_by',
+                'initial = :initial',
+                'running = :running',
             ];
 
             $sandInventoryIds = [1898,1897,1906,1907];
+            $sumBindParams    = [];
             foreach ($sandInventoryIds as $invId) {
                 $iCol = "i_{$invId}";
                 $pCol = "p_{$invId}";
@@ -349,6 +355,9 @@ class SandController extends Controller
                 $updateClauses[] = "`{$rCol}` = VALUES(`{$rCol}`)";
                 $updateClauses[] = "`{$gCol}` = VALUES(`{$gCol}`)";
                 $updateClauses[] = "`{$toCol}` = VALUES(`{$toCol}`)";
+
+                $sumBindParams["e_{$invId}"]    = 0.0;
+                $sumBindParams["ex_{$invId}"]   = 0.0;
             }
 
             $sqlUpsertDay = "
@@ -375,14 +384,21 @@ class SandController extends Controller
             ")->bindValue(':start_date', $startDate)->bindValue(':end_date', $endDate)->queryAll();
             $origData = array_column($origData, null, 'date');
 
+            $totalReplenishments    = 0.0;
+            $totalExpenses          = 0.0;
             while ($currentTimestamp < $endTimestamp) {
                 $dateStr = date('Y-m-d', $currentTimestamp);
                 $bindParams = [':date' => $dateStr];
                 $bindParams[':created_by'] = $userId;
                 $bindParams[':updated_by'] = $userId;
+                $bindParams[':initial']    = $runningGsData[0];
 
-                $sandPuhunan   = 0.00;
-                $sandTubo      = 0.00;
+                $allExpenses = 0.00;
+                if (isset($origData[$dateStr])) {
+                    $origItem = $origData[$dateStr];
+                    $allExpenses = $origItem['expenses'];
+                }
+
                 foreach ($sandInventoryIds as $invId) {
                     $iCol   = "i_{$invId}";
                     $pCol   = "p_{$invId}";
@@ -412,20 +428,26 @@ class SandController extends Controller
                     $bindParams[":{$pCol}"]     = $monPuhunan;
                     $bindParams[":{$tCol}"]     = $monTubo;
                     $bindParams[":{$eCol}"]     = $monExpenses;
+                    $totalReplenishments        += $monExpenses;
                     $bindParams[":{$exCol}"]    = $exPenses;
                     $bindParams[":{$rCol}"]     = 0;
                     $bindParams[":{$gCol}"]     = 0;
                     $bindParams[":{$toCol}"]    = 0;
 
-                    $sandPuhunan                += $monPuhunan;
-                    $sandTubo                   += $monTubo;
-
                     $bindParams[":{$iCol}"]     = $runningGsData[$invId];
                     $bindParams[":{$rCol}"]     = $runningGsData[$invId] + $monPuhunan - $monExpenses - $exPenses;
                     $runningGsData[$invId]      += $monPuhunan - $monExpenses - $exPenses;
-                }
 
-                $cmdUpsertDay->bindValues($bindParams)->execute();
+                    $runningGsData[0]           += $monPuhunan - $monExpenses - $exPenses;
+
+                    $sumBindParams["e_{$invId}"]    += $monExpenses;
+                    $sumBindParams["ex_{$invId}"]   += $exPenses;
+                }
+                $runningGsData[0]               = $runningGsData[0] - $allExpenses;
+
+                $bindParams[':running']         = $runningGsData[0];
+
+                $res = $cmdUpsertDay->bindValues($bindParams)->execute();
 
                 $currentTimestamp = strtotime('+1 day', $currentTimestamp);
             }
@@ -438,6 +460,9 @@ class SandController extends Controller
                 ':date' => $startDate,
                 ':created_by' => $userId,
                 ':updated_by' => $userId,
+                ':initial' => $initialGsData[0],
+                ':running' => $runningGsData[0],
+                ':replenishments' => $totalReplenishments,
             ];
 
             // Loop through each inventory ID to build columns, placeholders, and updates dynamically
@@ -466,8 +491,8 @@ class SandController extends Controller
                 $params[':initial_' . $id] = $initialGsData[$id];
                 $params[':puhunan_' . $id] = 0;
                 $params[':tubo_' . $id] = 0;
-                $params[':replenishment_' . $id] = 0;
-                $params[':expenses_' . $id] = 0;
+                $params[':replenishment_' . $id] = $sumBindParams["e_{$id}"];
+                $params[':expenses_' . $id] = $sumBindParams["ex_{$id}"];
                 $params[':running_' . $id] = $runningGsData[$id];
                 $params[':grand_' . $id] = 0;
                 $params[':total_' . $id] = 0;
@@ -486,9 +511,18 @@ class SandController extends Controller
             // Append audit columns
             $columns[] = 'created_by';
             $columns[] = 'updated_by';
+            $columns[] = 'initial';
+            $columns[] = 'running';
+            $columns[] = 'replenishments';
             $values[] = ':created_by';
             $values[] = ':updated_by';
+            $values[] = ':initial';
+            $values[] = ':running';
+            $values[] = ':replenishments';
             $updates[] = 'updated_by = VALUES(updated_by)';
+            $updates[] = 'initial = VALUES(initial)';
+            $updates[] = 'running = VALUES(running)';
+            $updates[] = 'replenishments = VALUES(replenishments)';
 
             // Assemble the final SQL string
             $sql = "INSERT INTO sand_monthly_ledger (" . implode(', ', $columns) . ") 
@@ -518,7 +552,7 @@ class SandController extends Controller
                     // 'total_tubo'            => $runningTubo,
                     // 'total_money_on_hand'   => $runningMoneyHand,
                 ],
-                // 'bind_params' => $bindParams,
+                // 'sumBindParams' => $sumBindParams,
                 // 'orig_item' => $origItem
             ];
 
@@ -563,23 +597,25 @@ class SandController extends Controller
             ["title"=>"Tubo Gravel","name"=>"tubo_gravel","align"=>"right","class"=>"w-28"],
             ["title"=>"Puhunan Gravel","name"=>"puhunan_gravel","align"=>"right","class"=>"w-28"],
             ["title"=>"Replenishment Gravel","name"=>"expenses_gravel","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses Gravel","name"=>"expenses_gravel","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance Gravel","name"=>"running_balance_gravel","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Expenses Gravel","name"=>"expenses_gravel","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Running Balance Gravel","name"=>"running_balance_gravel","align"=>"right","class"=>"w-28"],
             ["title"=>"Tubo White Sand","name"=>"tubo_sand","align"=>"right","class"=>"w-28"],
             ["title"=>"Puhunan White Sand","name"=>"puhunan_sand","align"=>"right","class"=>"w-28"],
             ["title"=>"Replenishment White Sand","name"=>"expenses_sand","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses White Sand","name"=>"expenses_sand","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance White Sand","name"=>"running_balance_sand","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Expenses White Sand","name"=>"expenses_sand","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Running Balance White Sand","name"=>"running_balance_sand","align"=>"right","class"=>"w-28"],
             ["title"=>"Tubo Sand Bistay","name"=>"tubo_sand_b","align"=>"right","class"=>"w-28"],
             ["title"=>"Puhunan Sand Bistay","name"=>"puhunan_sand_b","align"=>"right","class"=>"w-28"],
             ["title"=>"Replenishment Sand Bistay","name"=>"expenses_sand_b","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses Sand Bistay","name"=>"expenses_sand_b","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance Sand Bistay","name"=>"running_balance_sand_b","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Expenses Sand Bistay","name"=>"expenses_sand_b","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Running Balance Sand Bistay","name"=>"running_balance_sand_b","align"=>"right","class"=>"w-28"],
             ["title"=>"Tubo Sand Hindi Bistay","name"=>"tubo_sand_h","align"=>"right","class"=>"w-28"],
             ["title"=>"Puhunan Sand Hindi Bistay","name"=>"puhunan_sand_h","align"=>"right","class"=>"w-28"],
             ["title"=>"Replenishment Sand Hindi Bistay","name"=>"expenses_sand_h","align"=>"right","class"=>"w-28"],
-            ["title"=>"Expenses Sand Hindi Bistay","name"=>"expenses_sand_h","align"=>"right","class"=>"w-28"],
-            ["title"=>"Running Balance Sand Hindi Bistay","name"=>"running_balance_sand_h","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Expenses Sand Hindi Bistay","name"=>"expenses_sand_h","align"=>"right","class"=>"w-28"],
+            // ["title"=>"Running Balance Sand Hindi Bistay","name"=>"running_balance_sand_h","align"=>"right","class"=>"w-28"],
+            ["title"=>"Expenses","name"=>"expenses","align"=>"right","class"=>"w-28"],
+            ["title"=>"Running Balance","name"=>"running_balance","align"=>"right","class"=>"w-28"],
             // ["title"=>"Action","name"=>"action","default"=>1,"class"=>"w-20"],
         ];
         // array_splice($tableHeader, 5, 0, $additionalHeader);
@@ -604,6 +640,10 @@ class SandController extends Controller
             'success' => true,
             'headers' => json_encode($tableHeader),
 
+            'initial'           => $dataMonth['initial'],
+            'running'           => $dataMonth['running'],
+            'replenishments'   => $dataMonth['replenishments'],
+
             'initialGravel' => $dataMonth['i_1898'],
             'initialSand'   => $dataMonth['i_1897'],
             'initialSandB'  => $dataMonth['i_1906'],
@@ -613,6 +653,11 @@ class SandController extends Controller
             'finalSand'   => $dataMonth['r_1897'],
             'finalSandB'  => $dataMonth['r_1906'],
             'finalSandH'  => $dataMonth['r_1907'],
+
+            'replenishmentGravel' => $dataMonth['e_1898'],
+            'replenishmentSand'   => $dataMonth['e_1897'],
+            'replenishmentSandB'  => $dataMonth['e_1906'],
+            'replenishmentSandH'  => $dataMonth['e_1907'],
 
             'total' => [
                 'initialTotal'  => (float)$dataMonth['i_1898'] + (float)$dataMonth['i_1897'] + (float)$dataMonth['i_1906'] + (float)$dataMonth['i_1907'],
@@ -772,6 +817,7 @@ class SandController extends Controller
 
             $date = Yii::$app->request->getBodyParam('date');
             $initialGsData            = [];
+            $initialGsData[0]         = Yii::$app->request->getBodyParam('initial');
             $initialGsData[1898]      = Yii::$app->request->getBodyParam('initialGravel');
             $initialGsData[1897]      = Yii::$app->request->getBodyParam('initialSand');
             $initialGsData[1906]      = Yii::$app->request->getBodyParam('initialSandB');
