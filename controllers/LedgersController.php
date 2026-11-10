@@ -741,7 +741,7 @@ class LedgersController extends Controller
             $initialMoneyOnHand = Yii::$app->request->getBodyParam('initialMoneyOnHand');
             $initialPuhunan = Yii::$app->request->getBodyParam('initialPuhunan');
             $initialTubo = Yii::$app->request->getBodyParam('initialTubo');
-            $this->processReportMonthly($date, $initialMoneyOnHand, $initialPuhunan, $initialTubo);
+            $this->processReportMonthly($date, $initialMoneyOnHand, $initialTubo, $initialPuhunan);
 
             // 5. Return success status
             return [
